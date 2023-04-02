@@ -19,7 +19,74 @@ def check_winget_installed():
     except:
         return False
 
+def install_google_chrome():
+    winget_install("Google.Chrome")
+
+def install_telegram():
+    winget_install("9NZTWSQNTD0S")
+
+def install_messenger():
+    winget_install("9WZDNCRF0083")
+
+def install_discord():
+    winget_install("Discord.Discord")
+
+def install_ts3():
+    winget_install("TeamSpeakSystems.TeamSpeakClient")
+
+def install_steam():
+    winget_install("Valve.Steam")
+
+def install_epic_games_store():
+    winget_install("EpicGames.EpicGamesLauncher")
+
+def install_ubisoft_connect():
+    winget_install("Ubisoft.Connect")
+
+def install_ea_desktop():
+    winget_install("ElectronicArts.EADesktop")
+
+def install_battle_net():
+    print("todo")
+
+def install_hw_monitor():
+    winget_install("CPUID.HWMonitor")
+
+def install_7zip():
+    winget_install("7zip.7zip")
+
+def install_windows_terminal():
+    winget_install("9N0DX20HK701")
+
+
 checkboxes = []
+checkbox_function = {
+    "Google Chrome": install_google_chrome,
+    "Telegram": install_telegram,
+    "Messenger": install_messenger,
+    "Discord": install_discord,
+    "TeamSpeak3": install_ts3,
+    "Steam": install_steam,
+    "Epic Games Store": install_epic_games_store,
+    "Ubisoft Connect": install_ubisoft_connect,
+    "EA Desktop": install_ea_desktop,
+    "Battle.net": install_battle_net,
+    "Windows Terminal": install_windows_terminal,
+    "DirectX 9": install_7zip,
+    "HW Monitor": install_hw_monitor,
+    "HW Info": install_hw_monitor,
+    "7-Zip": install_7zip,
+    "NVCleanstall": install_7zip,
+    "CPU-Z": install_7zip,
+    "GPU-Z": install_7zip,
+    "Davinci Resolve": install_7zip,
+    "Creative Cloud": install_7zip,
+    "DisplayCal": install_7zip,
+    "Kopiuj pliki na pulpit": install_7zip,
+    "Instaluj lokalne oprogramowanie": install_7zip,
+    
+    }
+    
 
 def create_checkbox(name, frame):
     var = tk.BooleanVar()
@@ -41,6 +108,9 @@ def check_checkbox(name):
         if checkbox['checkbox'].cget("text") == name:
             checkbox['checkbox'].select()
 
+# def check_task():
+    
+
 def winget_install(name):
     subprocess.run(["winget", "install", "-e" ,"--accept-package-agreements", "--accept-source-agreements" , name])
 
@@ -57,13 +127,12 @@ def start_installation():
         progress_bar_single_task_percentage = 100/count_checkboxes_checked()
 
     for checkbox in checkboxes:
+        #jeśli checkbox jest zaznaczony
         if checkbox["var"].get():
             current_task_label["text"] = checkbox['checkbox'].cget("text") #aktualizacja labelki
             current_task_label.update()
-            if checkbox['checkbox'].cget("text") == "HW Monitor":
-                winget_install("CPUID.HWMonitor")
-            if checkbox['checkbox'].cget("text") == "7-Zip":
-                winget_install("7zip.7zip")
+            #wywołanie funkcji przypisanej w słowniku checkbox_function
+            checkbox_function[checkbox['checkbox'].cget("text")]()
             progress_bar["value"] = progress_bar["value"] + progress_bar_single_task_percentage
             progress_bar.update()
     
@@ -76,13 +145,9 @@ def start_benchmark():
         'HW Monitor',
         '7-Zip'
     ]
-
+    #zaznacza checkboxy określone w tablicy
     for checkbox_name in checkboxes_to_check:
         check_checkbox(checkbox_name)
-        
-
-
-    print("Rozpoczynam benchmark")
 
 
 if not is_admin():
@@ -128,10 +193,10 @@ left_frame.pack(side="left", fill="y")
 #tworzenie trzech kolumn na checkboxy
 frame1 = tk.Frame(root)
 frame1.pack(side="left", padx=10)
-frame2 = tk.Frame(root)
-frame2.pack(side="left", padx=10)
-frame3 = tk.Frame(root)
-frame3.pack(side="left", padx=10)
+# frame2 = tk.Frame(root)
+# frame2.pack(side="left", padx=10)
+# frame3 = tk.Frame(root)
+# frame3.pack(side="left", padx=10)
 
 # tworzenie przycisku "Rozpocznij instalację!"
 install_button = tk.Button(left_frame, text="Instaluj!", command=start_installation, font=("OpenSans", 18))
@@ -158,28 +223,30 @@ progress_bar.pack(pady=10)
 # label.pack(pady=10)
 
 # Kolumna 1
-create_checkbox("Google Chrome",frame1)
-create_checkbox("Telegram",frame1)
-create_checkbox("Messenger",frame1)
-create_checkbox("Discord",frame1)
-create_checkbox("TeamSpeak 3",frame1)
-create_checkbox("Steam",frame1)
-create_checkbox("Epic Games Store",frame1)
-create_checkbox("Ubisoft Connect",frame1)
-create_checkbox("Battle.net",frame1)
-create_checkbox("DirectX 9",frame1)
-create_checkbox("Chrome",frame1)
+# create_checkbox("Google Chrome",frame1)
+# create_checkbox("Telegram",frame1)
+# create_checkbox("Messenger",frame1)
+# create_checkbox("Discord",frame1)
+# create_checkbox("TeamSpeak 3",frame1)
+# create_checkbox("Steam",frame1)
+# create_checkbox("Epic Games Store",frame1)
+# create_checkbox("Ubisoft Connect",frame1)
+# create_checkbox("Battle.net",frame1)
+# create_checkbox("DirectX 9",frame1)
+# create_checkbox("Chrome",frame1)
 
-#Kolumna 2 create_checkbox("",frame2)
-create_checkbox("Windows Terminal",frame2)
-create_checkbox("HW Monitor",frame2)
-create_checkbox("HW Info",frame2)
-create_checkbox("7-Zip",frame2)
-create_checkbox("NVCleanstall",frame2)
-create_checkbox("CPU-Z",frame2)
-create_checkbox("GPU-Z",frame2)
-create_checkbox("Kopiuj pliki na pulpit",frame2)
-create_checkbox("Instaluj lokalne oprogramowanie",frame2)
+# #Kolumna 2 create_checkbox("",frame2)
+# create_checkbox("Windows Terminal",frame2)
+# create_checkbox("HW Monitor",frame2)
+# create_checkbox("HW Info",frame2)
+# create_checkbox("7-Zip",frame2)
+# create_checkbox("NVCleanstall",frame2)
+# create_checkbox("CPU-Z",frame2)
+# create_checkbox("GPU-Z",frame2)
+# create_checkbox("Kopiuj pliki na pulpit",frame2)
+# create_checkbox("Instaluj lokalne oprogramowanie",frame2)
+for checkbox in checkbox_function:
+    create_checkbox(checkbox, frame1)
 
 
 # Uruchomienie pętli zdarzeń okna
