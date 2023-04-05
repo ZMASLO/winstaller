@@ -1,5 +1,6 @@
 import os
 import sys
+import shutil
 import ctypes
 import subprocess
 import tkinter as tk
@@ -58,6 +59,125 @@ def install_7zip():
 def install_windows_terminal():
     winget_install("9N0DX20HK701")
 
+def install_directx9():
+    subprocess.run([os.getcwd()+"\\dx9\\DXSETUP.exe", "/silent"])
+
+def install_hw_info():
+    winget_install("REALiX.HWiNFO")
+
+def install_nvcleanstall():
+    winget_install("TechPowerUp.NVCleanstall")
+
+def install_cpuz():
+    winget_install("CPUID.CPU-Z")
+
+def install_gpuz():
+    winget_install("TechPowerUp.GPU-Z")
+
+def install_displaycal():
+    winget_install("FlorianHoech.DisplayCAL")
+
+def install_creativecloud():
+    winget_install("XPDLPKWG9SW2WD")
+
+def install_local_software():
+    subprocess.run([os.getcwd()+"\\RTSSSetup734.exe", "/S"])
+    subprocess.run([os.getcwd()+"\\CapFrameXBootstrapper.exe", "/S"])
+
+def copy_benchmark_tools():
+    copy_directory_to_desktop("BenchmarkTools")
+
+def test_box():
+    copy_directory_to_desktop("folderek")
+
+def remove_bloat():
+    bloatware = [
+        #Unnecessary Windows 10 AppX Apps
+        "Microsoft.3DBuilder",
+        "Microsoft.Microsoft3DViewer",
+        "Microsoft.AppConnector",
+        "Microsoft.BingFinance",
+        "Microsoft.BingNews",
+        "Microsoft.BingSports",
+        "Microsoft.BingTranslator",
+        "Microsoft.BingWeather",
+        "Microsoft.BingFoodAndDrink",
+        "Microsoft.BingHealthAndFitness",
+        "Microsoft.BingTravel",
+        "Microsoft.MinecraftUWP",
+        # "Microsoft.GamingServices",
+        # "Microsoft.WindowsReadingList",
+        "Microsoft.GetHelp",
+        "Microsoft.Getstarted",
+        "Microsoft.Messaging",
+        "Microsoft.Microsoft3DViewer",
+        "Microsoft.MicrosoftSolitaireCollection",
+        "Microsoft.NetworkSpeedTest",
+        "Microsoft.News",
+        "Microsoft.Office.Lens",
+        "Microsoft.Office.Sway",
+        "Microsoft.Office.OneNote",
+        "Microsoft.OneConnect",
+        "Microsoft.People",
+        "Microsoft.Print3D",
+        "Microsoft.SkypeApp",
+        "Microsoft.Wallet",
+        "Microsoft.Whiteboard",
+        # "Microsoft.WindowsAlarms",
+        "microsoft.windowscommunicationsapps",
+        "Microsoft.WindowsFeedbackHub",
+        "Microsoft.WindowsMaps",
+        "Microsoft.WindowsPhone",
+        "Microsoft.WindowsSoundRecorder",
+        "Microsoft.ConnectivityStore",
+        "Microsoft.CommsPhone",
+        # "Microsoft.ScreenSketch",
+        "Microsoft.ZuneMusic",
+        "Microsoft.ZuneVideo",
+        "Microsoft.YourPhone",
+        "Microsoft.Getstarted",
+        "Microsoft.MicrosoftOfficeHub",
+
+        #Sponsored Windows 10 AppX Apps
+        #Add sponsored/featured apps to remove in the "*AppName*" format
+        "*EclipseManager*",
+        "*ActiproSoftwareLLC*",
+        "*AdobeSystemsIncorporated.AdobePhotoshopExpress*",
+        "*Duolingo-LearnLanguagesforFree*",
+        "*PandoraMediaInc*",
+        "*CandyCrush*",
+        "*BubbleWitch3Saga*",
+        "*Wunderlist*",
+        "*Flipboard*",
+        "*Twitter*",
+        "*Facebook*",
+        "*Royal Revolt*",
+        "*Sway*",
+        "*Speed Test*",
+        "*Dolby*",
+        "*Viber*",
+        "*ACGMediaPlayer*",
+        "*Netflix*",
+        "*OneCalendar*",
+        "*LinkedInforWindows*",
+        "*HiddenCityMysteryofShadows*",
+        "*Hulu*",
+        "*HiddenCity*",
+        "*AdobePhotoshopExpress*",
+        "*HotspotShieldFreeVPN*",
+        "*Whatsapp*",
+        "*Disney*",
+
+        #Optional: Typically not removed but you can if you need to for some reason
+        "*Microsoft.Advertising.Xaml*",
+        #"*Microsoft.MSPaint*",
+        #"*Microsoft.MicrosoftStickyNotes*",
+        #"*Microsoft.Windows.Photos*",
+        #"*Microsoft.WindowsCalculator*",
+        #"*Microsoft.WindowsStore*",
+    ]
+    for bloat in bloatware:
+        subprocess.run(["powershell.exe", "-Command", "Get-AppxPackage *"+bloat+"* | Remove-AppxPackage"])
 
 checkboxes = []
 checkbox_function = {
@@ -72,18 +192,20 @@ checkbox_function = {
     "EA Desktop": install_ea_desktop,
     "Battle.net": install_battle_net,
     "Windows Terminal": install_windows_terminal,
-    "DirectX 9": install_7zip,
+    "DirectX 9": install_directx9,
     "HW Monitor": install_hw_monitor,
-    "HW Info": install_hw_monitor,
+    "HW Info": install_hw_info,
     "7-Zip": install_7zip,
-    "NVCleanstall": install_7zip,
-    "CPU-Z": install_7zip,
-    "GPU-Z": install_7zip,
+    "NVCleanstall": install_nvcleanstall,
+    "CPU-Z": install_cpuz,
+    "GPU-Z": install_gpuz,
     "Davinci Resolve": install_7zip,
-    "Creative Cloud": install_7zip,
-    "DisplayCal": install_7zip,
-    "Kopiuj pliki na pulpit": install_7zip,
-    "Instaluj lokalne oprogramowanie": install_7zip,
+    "Creative Cloud": install_creativecloud,
+    "DisplayCal": install_displaycal,
+    "Kopiuj BenchmarkTools na pulpit": install_7zip,
+    "Instaluj lokalne oprogramowanie": install_local_software,
+    "Usuń bloatware z Windows": remove_bloat,
+    "TEST BOX": test_box,
     
     }
     
@@ -108,9 +230,12 @@ def check_checkbox(name):
         if checkbox['checkbox'].cget("text") == name:
             checkbox['checkbox'].select()
 
-# def check_task():
+def copy_directory_to_desktop(file_name):
+    src_path = file_name
+    user_home = os.path.expanduser("~")
+    dest_path = os.path.join(user_home, "Desktop", file_name)
+    shutil.copytree(src_path, dest_path)
     
-
 def winget_install(name):
     subprocess.run(["winget", "install", "-e" ,"--accept-package-agreements", "--accept-source-agreements" , name])
 
@@ -132,7 +257,11 @@ def start_installation():
             current_task_label["text"] = checkbox['checkbox'].cget("text") #aktualizacja labelki
             current_task_label.update()
             #wywołanie funkcji przypisanej w słowniku checkbox_function
-            checkbox_function[checkbox['checkbox'].cget("text")]()
+            try:
+                checkbox_function[checkbox['checkbox'].cget("text")]()
+            except Exception as e:
+                show_message("Problem podczas instalacji "+checkbox['checkbox'].cget("text")+"\n"+str(e))
+            #aktualizacja paska postępu
             progress_bar["value"] = progress_bar["value"] + progress_bar_single_task_percentage
             progress_bar.update()
     
@@ -222,29 +351,6 @@ progress_bar.pack(pady=10)
 # label = tk.Label(root, text="Zaznacz programy, które chcesz zainstalować:")
 # label.pack(pady=10)
 
-# Kolumna 1
-# create_checkbox("Google Chrome",frame1)
-# create_checkbox("Telegram",frame1)
-# create_checkbox("Messenger",frame1)
-# create_checkbox("Discord",frame1)
-# create_checkbox("TeamSpeak 3",frame1)
-# create_checkbox("Steam",frame1)
-# create_checkbox("Epic Games Store",frame1)
-# create_checkbox("Ubisoft Connect",frame1)
-# create_checkbox("Battle.net",frame1)
-# create_checkbox("DirectX 9",frame1)
-# create_checkbox("Chrome",frame1)
-
-# #Kolumna 2 create_checkbox("",frame2)
-# create_checkbox("Windows Terminal",frame2)
-# create_checkbox("HW Monitor",frame2)
-# create_checkbox("HW Info",frame2)
-# create_checkbox("7-Zip",frame2)
-# create_checkbox("NVCleanstall",frame2)
-# create_checkbox("CPU-Z",frame2)
-# create_checkbox("GPU-Z",frame2)
-# create_checkbox("Kopiuj pliki na pulpit",frame2)
-# create_checkbox("Instaluj lokalne oprogramowanie",frame2)
 for checkbox in checkbox_function:
     create_checkbox(checkbox, frame1)
 
