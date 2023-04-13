@@ -228,6 +228,11 @@ def count_checkboxes_checked():
     
     return counter
 
+def uncheck_all_checkboxes():
+    for checkbox in checkboxes:
+        if checkbox["var"].get():
+            checkbox['checkbox'].deselect()
+
 def check_checkbox(name):
     for checkbox in checkboxes:
         if checkbox['checkbox'].cget("text") == name:
@@ -267,15 +272,30 @@ def start_installation():
             #aktualizacja paska postępu
             progress_bar["value"] = progress_bar["value"] + progress_bar_single_task_percentage
             progress_bar.update()
+            checkbox['checkbox'].deselect()
+            
     
     current_task_label["text"] = "Brak zadań."
     current_task_label.update()
+    show_message("Zakończono instalację!")
     
 
 def start_benchmark():
     checkboxes_to_check =[
         'HW Monitor',
-        '7-Zip'
+        '7-Zip',
+        'HW Info',
+        'Google Chrome',
+        'Steam',
+        'Epic Games Store',
+        'Ubisoft Connect',
+        'DirectX 9',
+        'Windows Terminal',
+        'Kopiuj BenchmarkTools na pulpit',
+        'Instaluj lokalne oprogramowanie',
+        'Usuń bloatware z Windows',
+        'CPU-Z',
+        'GPU-Z',
     ]
     #zaznacza checkboxy określone w tablicy
     for checkbox_name in checkboxes_to_check:
@@ -306,7 +326,7 @@ if not check_winget_installed():
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.1")
+root.title("Winstaller 0.2")
 
 # Ustawienie rozmiaru okna
 root.geometry("600x600")
@@ -318,8 +338,8 @@ left_frame.pack(side="left", fill="y")
 #tworzenie trzech kolumn na checkboxy
 frame1 = tk.Frame(root)
 frame1.pack(side="left", padx=10)
-# frame2 = tk.Frame(root)
-# frame2.pack(side="left", padx=10)
+frame2 = tk.Frame(root)
+frame2.pack(side="left", padx=10)
 # frame3 = tk.Frame(root)
 # frame3.pack(side="left", padx=10)
 
@@ -329,7 +349,10 @@ install_button.pack(pady=50)
 
 # tworzenie przycisku "benchmark starter"
 benchmark_button = tk.Button(left_frame, text="benchmark starter", command=start_benchmark, font=("OpenSans", 18))
-benchmark_button.pack()
+benchmark_button.pack(pady=20)
+
+uncheck_button = tk.Button(left_frame, text="odznacz wszystkie", command=uncheck_all_checkboxes, font=("OpenSans", 12))
+uncheck_button.pack()
 
 #Etykieta
 task_label = tk.Label(left_frame, text="Postęp zadań:", bg="darkgray")
@@ -343,12 +366,13 @@ current_task_label.pack(pady=10)
 progress_bar = ttk.Progressbar(left_frame, orient="horizontal", length=200, mode="determinate")
 progress_bar.pack(pady=10)
 
-# # Dodanie etykiety do okna
-# label = tk.Label(root, text="Zaznacz programy, które chcesz zainstalować:")
-# label.pack(pady=10)
-
+counter = 0
 for checkbox in checkbox_function:
-    create_checkbox(checkbox, frame1)
+    if counter < 15:
+        create_checkbox(checkbox, frame1)
+    else:
+        create_checkbox(checkbox, frame2)
+    counter = counter + 1
 
 
 # Uruchomienie pętli zdarzeń okna
