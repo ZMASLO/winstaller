@@ -6,6 +6,8 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
+import winreg
+import time
 
 def is_admin():
     try:
@@ -87,8 +89,75 @@ def install_local_software():
 def copy_benchmark_tools():
     copy_directory_to_desktop("BenchmarkTools")
 
+def windows_light_mode():
+    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+    value_name = "AppsUseLightTheme"
+
+    try:
+        # Otwórz klucz rejestru
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+        winreg.DeleteValue(key, value_name)
+        # Zamknij klucz rejestru
+        winreg.CloseKey(key)
+
+    except Exception as e:
+        show_message(f"Wystąpił błąd podczas usuwania wartości {value_name} z klucza {key_path}: {e}")
+
+def windows_dark_mode():
+    # Ustawianie ścieżki rejestru
+    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+    winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, 0)
+    # Zamknij klucz rejestru
+    winreg.CloseKey(key)
+
+def uninstall_onedrive():
+    key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\OneDrive")
+    winreg.SetValueEx(key, "DisableFileSyncNGSC", 0, winreg.REG_DWORD, 1)
+
+    subprocess.run(["taskkill", "/F", "/IM", "OneDrive.exe"])
+
+    time.sleep(2)
+
+    onedrive = os.path.join(os.environ['SYSTEMROOT'], "SysWOW64", "OneDriveSetup.exe")
+    if not os.path.exists(onedrive):
+        onedrive = os.path.join(os.environ['SYSTEMROOT'], "System32", "OneDriveSetup.exe")
+
+    subprocess.run([onedrive, "/uninstall"], check=True)
+
+    time.sleep(2)
+
+    subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"])
+
+    time.sleep(2)
+
+    shutil.rmtree(os.path.join(os.environ['USERPROFILE'], "OneDrive"), ignore_errors=True)
+    shutil.rmtree(os.path.join(os.environ['LOCALAPPDATA'], "Microsoft", "OneDrive"), ignore_errors=True)
+    shutil.rmtree(os.path.join(os.environ['PROGRAMDATA'], "Microsoft OneDrive"), ignore_errors=True)
+    shutil.rmtree(os.path.join(os.environ['SYSTEMDRIVE'], "OneDriveTemp"), ignore_errors=True)
+
+    try:
+        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, r"CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}")
+    except OSError:
+        pass
+
+    try:
+        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, r"Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}")
+    except OSError:
+        pass
+    
+    winreg.CloseKey(key)
+
+def install_onedrive():
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\OneDrive", 0, winreg.KEY_WRITE) as key:
+            winreg.DeleteValue(key, "DisableFileSyncNGSC")
+    except: 
+        pass
+
+    os.system(os.path.join(os.environ["systemroot"], "SysWOW64", "OneDriveSetup.exe"))
+
 def test_box():
-    copy_directory_to_desktop("folderek")
+    print("TEST")
 
 def remove_bloat():
     bloatware = [
@@ -208,6 +277,10 @@ checkbox_function = {
     "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools,
     "Instaluj lokalne oprogramowanie": install_local_software,
     "Usuń bloatware z Windows": remove_bloat,
+    "Ciemny motyw Windows": windows_dark_mode,
+    "Jasny motyw Windows": windows_light_mode,
+    "Odinstaluj OneDrive": uninstall_onedrive,
+    "Instaluj OneDrive": install_onedrive,
     "TEST BOX": test_box,
     
     }
@@ -296,6 +369,7 @@ def start_benchmark():
         'Usuń bloatware z Windows',
         'CPU-Z',
         'GPU-Z',
+        'Ciemny motyw Windows',
     ]
     #zaznacza checkboxy określone w tablicy
     for checkbox_name in checkboxes_to_check:
@@ -344,7 +418,7 @@ frame2.pack(side="left", padx=10)
 # frame3.pack(side="left", padx=10)
 
 # tworzenie przycisku "Rozpocznij instalację!"
-install_button = tk.Button(left_frame, text="Instaluj!", command=start_installation, font=("OpenSans", 18))
+install_button = tk.Button(left_frame, text="Uruchom!", command=start_installation, font=("OpenSans", 18))
 install_button.pack(pady=50)
 
 # tworzenie przycisku "benchmark starter"
