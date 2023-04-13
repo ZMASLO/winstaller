@@ -167,6 +167,9 @@ def remove_bloat():
         "*HotspotShieldFreeVPN*",
         "*Whatsapp*",
         "*Disney*",
+        "*Instagram*",
+        "*EPSN*",
+        "*Prime Video*",
 
         #Optional: Typically not removed but you can if you need to for some reason
         "*Microsoft.Advertising.Xaml*",
@@ -202,7 +205,7 @@ checkbox_function = {
     "Davinci Resolve": install_7zip,
     "Creative Cloud": install_creativecloud,
     "DisplayCal": install_displaycal,
-    "Kopiuj BenchmarkTools na pulpit": install_7zip,
+    "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools,
     "Instaluj lokalne oprogramowanie": install_local_software,
     "Usuń bloatware z Windows": remove_bloat,
     "TEST BOX": test_box,
@@ -289,21 +292,14 @@ if not is_admin():
 # Sprawdzenie czy jest zainstalowany winget
 
 if not check_winget_installed():
-    print("Program Winget nie jest zainstalowany.")
-    print("Rozpoczynam instalację...")
-
-    # Pobieranie pliku instalacyjnego
-    os.makedirs("winget_installer", exist_ok=True)
-    subprocess.run(["curl", "-Lo", "winget_installer/appinstaller.exe", "https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.appxbundle"])
-
+    show_message("Instalowanie winget!")
+    
     # Instalowanie programu
-    subprocess.run(["powershell", "-Command", "Add-AppxPackage -Path winget_installer\\appinstaller.exe"])
+    try:
+        subprocess.run(["powershell", "-Command", "Add-AppxPackage https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"])
+    except Exception as e:
+        show_message("Problem podczas instalacji winget "+str(e))
 
-    # Sprawdzanie, czy program został zainstalowany
-    if check_winget_installed():
-        print("Program Winget został pomyślnie zainstalowany.")
-    else:
-        print("Błąd podczas instalacji programu Winget.")
 
 
 # Tworzenie głównego okna
