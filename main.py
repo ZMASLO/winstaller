@@ -156,6 +156,12 @@ def install_onedrive():
 
     os.system(os.path.join(os.environ["systemroot"], "SysWOW64", "OneDriveSetup.exe"))
 
+def reboot_to_bios():
+    subprocess.run(["shutdown.exe", "-t", "0", "-r", "-fw"])
+
+def reboot_to_advanced_startup():
+    subprocess.run(["shutdown.exe", "-t", "0", "-r", "-o"])
+
 def test_box():
     print("TEST")
 
@@ -281,6 +287,8 @@ checkbox_function = {
     "Jasny motyw Windows": windows_light_mode,
     "Odinstaluj OneDrive": uninstall_onedrive,
     "Instaluj OneDrive": install_onedrive,
+    "Restart i uruchom BIOS": reboot_to_bios,
+    "Restart i zaawansowane uruchamianie": reboot_to_advanced_startup,
     "TEST BOX": test_box,
     
     }
@@ -400,10 +408,10 @@ if not check_winget_installed():
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.2")
+root.title("Winstaller 0.2.1")
 
 # Ustawienie rozmiaru okna
-root.geometry("600x600")
+root.geometry("700x600")
 
 # tworzenie ramki na lewo od okna głównego
 left_frame = tk.Frame(root, bg="darkgray", padx=10)
