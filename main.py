@@ -146,6 +146,7 @@ def uninstall_onedrive():
         pass
     
     winreg.CloseKey(key)
+    subprocess.run(["explorer.exe"])
 
 def install_onedrive():
     try:
@@ -161,6 +162,9 @@ def reboot_to_bios():
 
 def reboot_to_advanced_startup():
     subprocess.run(["shutdown.exe", "-t", "0", "-r", "-o"])
+
+def install_blender():
+    winget_install("BlenderFoundation.Blender")
 
 def test_box():
     print("TEST")
@@ -277,6 +281,7 @@ checkbox_function = {
     "NVCleanstall": install_nvcleanstall,
     "CPU-Z": install_cpuz,
     "GPU-Z": install_gpuz,
+    "Blender": install_blender,
     "Davinci Resolve": install_7zip,
     "Creative Cloud": install_creativecloud,
     "DisplayCal": install_displaycal,
