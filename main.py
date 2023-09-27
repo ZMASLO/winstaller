@@ -39,9 +39,13 @@ def install_ts3():
 
 def install_steam():
     winget_install("Valve.Steam")
+    steam_path = r'C:\Program Files (x86)\Steam\Steam.exe'
+    subprocess.Popen([steam_path])
 
 def install_epic_games_store():
     winget_install("EpicGames.EpicGamesLauncher")
+    epic_path = r'C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe'
+    subprocess.Popen([epic_path])
 
 def install_ubisoft_connect():
     winget_install("Ubisoft.Connect")
@@ -79,6 +83,9 @@ def install_gpuz():
 def install_displaycal():
     winget_install("FlorianHoech.DisplayCAL")
 
+def install_msi_afterburner():
+    winget_install("Guru3D.Afterburner")    
+
 def install_creativecloud():
     winget_install("XPDLPKWG9SW2WD")
 
@@ -88,6 +95,9 @@ def install_local_software():
 
 def copy_benchmark_tools():
     copy_directory_to_desktop("BenchmarkTools")
+
+def copy_winstaller():
+    copy_file_to_desktop("winstaller.exe")
 
 def windows_light_mode():
     key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
@@ -285,7 +295,9 @@ checkbox_function = {
     "Davinci Resolve": install_7zip,
     "Creative Cloud": install_creativecloud,
     "DisplayCal": install_displaycal,
+    "MSI Afterburner": install_msi_afterburner,
     "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools,
+    "Kopiuj winstaller na pulpit": copy_winstaller,
     "Instaluj lokalne oprogramowanie": install_local_software,
     "Usuń bloatware z Windows": remove_bloat,
     "Ciemny motyw Windows": windows_dark_mode,
@@ -324,14 +336,18 @@ def check_checkbox(name):
         if checkbox['checkbox'].cget("text") == name:
             checkbox['checkbox'].select()
 
+def copy_file_to_desktop(file_name):
+    user_home = os.path.expanduser("~")
+    dest_path = os.path.join(user_home, "Desktop")
+    shutil.copy(file_name, dest_path)
+
 def copy_directory_to_desktop(file_name):
-    src_path = file_name
     user_home = os.path.expanduser("~")
     dest_path = os.path.join(user_home, "Desktop", file_name)
-    shutil.copytree(src_path, dest_path)
+    shutil.copytree(file_name, dest_path)
     
 def winget_install(name):
-    subprocess.run(["winget", "install", "-e" ,"--accept-package-agreements", "--accept-source-agreements" , name])
+    subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , name])
 
 
 def show_message(message):
@@ -383,6 +399,8 @@ def start_benchmark():
         'CPU-Z',
         'GPU-Z',
         'Ciemny motyw Windows',
+        'Blender',
+        'Kopiuj winstaller na pulpit',
     ]
     #zaznacza checkboxy określone w tablicy
     for checkbox_name in checkboxes_to_check:
@@ -413,7 +431,7 @@ if not check_winget_installed():
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.2.1")
+root.title("Winstaller 0.2.2")
 
 # Ustawienie rozmiaru okna
 root.geometry("700x600")
