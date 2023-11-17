@@ -8,6 +8,8 @@ from tkinter import ttk
 from tkinter import messagebox
 import winreg
 import time
+import threading
+import ctypes
 
 def is_admin():
     try:
@@ -271,6 +273,15 @@ def remove_bloat():
     for bloat in bloatware:
         subprocess.run(["powershell.exe", "-Command", "Get-AppxPackage *"+bloat+"* | Remove-AppxPackage"])
 
+
+def log_toggle():
+    if log_button["text"] == "pokaż logi":
+        ctypes.windll.user32.ShowWindow(hwnd, 1)
+        log_button["text"]="ukryj logi"
+    else:
+        ctypes.windll.user32.ShowWindow(hwnd, 0)
+        log_button["text"]="pokaż logi"
+
 checkboxes = []
 checkbox_function = {
     "Google Chrome": install_google_chrome,
@@ -361,25 +372,29 @@ def start_installation():
     if count_checkboxes_checked():
         progress_bar_single_task_percentage = 100/count_checkboxes_checked()
 
-    for checkbox in checkboxes:
-        #jeśli checkbox jest zaznaczony
-        if checkbox["var"].get():
-            current_task_label["text"] = checkbox['checkbox'].cget("text") #aktualizacja labelki
-            current_task_label.update()
-            #wywołanie funkcji przypisanej w słowniku checkbox_function
-            try:
-                checkbox_function[checkbox['checkbox'].cget("text")]()
-            except Exception as e:
-                show_message("Problem podczas instalacji "+checkbox['checkbox'].cget("text")+"\n"+str(e))
-            #aktualizacja paska postępu
-            progress_bar["value"] = progress_bar["value"] + progress_bar_single_task_percentage
-            progress_bar.update()
-            checkbox['checkbox'].deselect()
-            
-    
-    current_task_label["text"] = "Brak zadań."
-    current_task_label.update()
-    show_message("Zakończono instalację!")
+    def execute_install():
+        for checkbox in checkboxes:
+            #jeśli checkbox jest zaznaczony
+            if checkbox["var"].get():
+                current_task_label["text"] = checkbox['checkbox'].cget("text") #aktualizacja labelki
+                current_task_label.update()
+                try:
+                    #wywołanie funkcji instalacyjnej przypisanej w słowniku checkbox_function
+                    checkbox_function[checkbox['checkbox'].cget("text")]()
+                except Exception as e:
+                    show_message("Problem podczas instalacji "+checkbox['checkbox'].cget("text")+"\n"+str(e))
+                    
+                #aktualizacja paska postępu
+                progress_bar["value"] = progress_bar["value"] + progress_bar_single_task_percentage
+                progress_bar.update()
+                checkbox['checkbox'].deselect()
+
+        current_task_label["text"] = "Brak zadań."
+        current_task_label.update()
+        show_message("Zakończono instalację!")
+
+    t = threading.Thread(target=execute_install)
+    t.start()
     
 
 def start_benchmark():
@@ -410,9 +425,6 @@ def start_benchmark():
 if not is_admin():
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, sys.argv[0], None, 1)
     sys.exit()
-# else:
-    # print("Skrypt uruchomiony z uprawnieniami administratora.")
-    # show_message("Skrypt uruchomiony z uprawnieniami administratora.")
 
 # Sprawdzenie czy jest zainstalowany winget
 
@@ -425,13 +437,15 @@ if not check_winget_installed():
     except Exception as e:
         show_message("Problem podczas instalacji winget "+str(e))
 
-
+#ukrycie konsoli z logami
+hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 oznacza SW_HIDE
 
 # Tworzenie głównego okna
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.2.2")
+root.title("Winstaller 0.3")
 
 # Ustawienie rozmiaru okna
 root.geometry("700x600")
@@ -457,7 +471,10 @@ benchmark_button = tk.Button(left_frame, text="benchmark starter", command=start
 benchmark_button.pack(pady=20)
 
 uncheck_button = tk.Button(left_frame, text="odznacz wszystkie", command=uncheck_all_checkboxes, font=("OpenSans", 12))
-uncheck_button.pack()
+uncheck_button.pack(pady=20)
+
+log_button = tk.Button(left_frame, text="pokaż logi", command=log_toggle, font=("OpenSans",12))
+log_button.pack()
 
 #Etykieta
 task_label = tk.Label(left_frame, text="Postęp zadań:", bg="darkgray")
