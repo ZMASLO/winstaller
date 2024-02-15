@@ -342,6 +342,10 @@ def uncheck_all_checkboxes():
         if checkbox["var"].get():
             checkbox['checkbox'].deselect()
 
+def checkbox_all_set_state(state):
+    for checkbox in checkboxes:
+        checkbox['checkbox']['state'] = state
+
 def check_checkbox(name):
     for checkbox in checkboxes:
         if checkbox['checkbox'].cget("text") == name:
@@ -373,6 +377,8 @@ def start_installation():
         progress_bar_single_task_percentage = 100/count_checkboxes_checked()
 
     def execute_install():
+        #zablokowanie checboxów na czas instalacji
+        checkbox_all_set_state("disabled")
         for checkbox in checkboxes:
             #jeśli checkbox jest zaznaczony
             if checkbox["var"].get():
@@ -391,6 +397,7 @@ def start_installation():
 
         current_task_label["text"] = "Brak zadań."
         current_task_label.update()
+        checkbox_all_set_state("normal")
         show_message("Zakończono instalację!")
 
     t = threading.Thread(target=execute_install)
@@ -445,7 +452,7 @@ ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 oznacza SW_HIDE
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.3")
+root.title("Winstaller 0.3.1")
 
 # Ustawienie rozmiaru okna
 root.geometry("700x600")
