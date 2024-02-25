@@ -10,6 +10,8 @@ import winreg
 import time
 import threading
 import ctypes
+import requests
+import zipfile
 
 def is_admin():
     try:
@@ -68,7 +70,17 @@ def install_windows_terminal():
     winget_install("9N0DX20HK701")
 
 def install_directx9():
-    subprocess.run([os.getcwd()+"\\dx9\\DXSETUP.exe", "/silent"])
+    # subprocess.run([os.getcwd()+"\\dx9\\DXSETUP.exe", "/silent"])
+    url="https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
+    download_install(url, ["/Q"])
+
+def install_rivatuner():
+    url="https://ftp.nluug.nl/pub/games/PC/guru3d/rtss/[Guru3D.com]-RTSS.zip"
+    download_unzip_install(url, ["/S"])
+
+def install_capframex():
+    url="https://cxblobs.blob.core.windows.net/releases/release_1.7.2_installer.zip"
+    download_unzip_install(url, ["/S"])
 
 def install_hw_info():
     winget_install("REALiX.HWiNFO")
@@ -95,11 +107,70 @@ def install_local_software():
     subprocess.run([os.getcwd()+"\\RTSSSetup734.exe", "/S"])
     subprocess.run([os.getcwd()+"\\CapFrameXBootstrapper.exe", "/S"])
 
+def install_davinci_resolve_studio():
+    url="https://swr.cloud.blackmagicdesign.com/DaVinciResolve/v18.6.5/DaVinci_Resolve_Studio_18.6.5_Windows.zip?verify=1708895095-TEqnC2EHHPvdHDdozxSY6zGdK39AtvRBeavKupsCxz8%3D"
+    download_unzip_install(url, ["/i", "/q", "/noreboot"])    
+
 def copy_benchmark_tools():
     copy_directory_to_desktop("BenchmarkTools")
 
 def copy_winstaller():
     copy_file_to_desktop("winstaller.exe")
+
+def download_install(url, install_parameters):
+    install_file = "install.exe"
+    response = requests.get(url)
+    if response.status_code == 200:
+        with open(install_file, 'wb') as file:
+            file.write(response.content)
+
+        # array for adding install parameters array
+        install = []
+        install.insert(0, os.getcwd()+"\\"+install_file)
+        for install_parameter in install_parameters:
+            install.append(install_parameter)
+        
+        subprocess.run(install)
+
+        # delete afeter install
+        os.remove(install_file)
+    else:
+        raise Exception("Błąd pobierania "+response.status_code)    
+
+def download_unzip_install(url, install_parameters):
+    zip_file = "install.zip"
+    response = requests.get(url)
+    if response.status_code == 200:
+        with open(zip_file, 'wb') as file:
+            file.write(response.content)
+
+        with zipfile.ZipFile("install.zip", 'r') as zip_ref:
+            zip_ref.extractall("install_extracted")
+
+        #delete downloaded .zip    
+        os.remove(zip_file)
+
+        #find install exe in extracted directory
+        install_file=find_exe(os.getcwd()+"\\install_extracted")
+        
+        # array for adding install parameters array
+        install = []
+        install.insert(0, os.getcwd()+"\\install_extracted\\"+install_file)
+        for install_parameter in install_parameters:
+            install.append(install_parameter)
+        
+        subprocess.run(install)
+
+        # delete extracted directory
+        shutil.rmtree("install_extracted")
+    else:
+        raise Exception("Błąd pobierania "+response.status_code)
+
+def find_exe(dir):
+    for file in os.listdir(dir):
+        if file.endswith(".exe"):
+            return file
+    return None  # Zwróć None, jeśli nie znaleziono pliku .exe w katalogu
 
 def windows_light_mode():
     key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
@@ -296,6 +367,8 @@ checkbox_function = {
     "Battle.net": install_battle_net,
     "Windows Terminal": install_windows_terminal,
     "DirectX 9": install_directx9,
+    "Rivatuner": install_rivatuner,
+    "CapFrameX": install_capframex,
     "HW Monitor": install_hw_monitor,
     "HW Info": install_hw_info,
     "7-Zip": install_7zip,
@@ -303,7 +376,7 @@ checkbox_function = {
     "CPU-Z": install_cpuz,
     "GPU-Z": install_gpuz,
     "Blender": install_blender,
-    "Davinci Resolve": install_7zip,
+    "Davinci Resolve Studio": install_davinci_resolve_studio,
     "Creative Cloud": install_creativecloud,
     "DisplayCal": install_displaycal,
     "MSI Afterburner": install_msi_afterburner,
@@ -356,10 +429,14 @@ def copy_file_to_desktop(file_name):
     dest_path = os.path.join(user_home, "Desktop")
     shutil.copy(file_name, dest_path)
 
-def copy_directory_to_desktop(file_name):
+def copy_directory_to_desktop(dir):
     user_home = os.path.expanduser("~")
-    dest_path = os.path.join(user_home, "Desktop", file_name)
-    shutil.copytree(file_name, dest_path)
+    dest_path = os.path.join(user_home, "Desktop", dir)
+    if (os.path.exists(dir) and os.path.isdir(dir)):
+        shutil.copytree(dir, dest_path)
+    else:
+        raise Exception("Folder BenchmarkTools nie istnieje!")
+    
     
 def winget_install(name):
     subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , name])
@@ -369,10 +446,16 @@ def show_message(message):
     # Funkcja wyświetlająca okno dialogowe z informacją
     messagebox.showinfo("Informacja", message) 
 
+def stop_installation():
+    stop_event.set()
+    stop_install_button["state"] = "disabled"
+    show_message("Zatrzymuję instalację...")
+
 
 def start_installation():
     progress_bar["value"] = 0  # resetowanie paska postępu
-    
+    stop_install_button["state"] = "normal"
+
     if count_checkboxes_checked():
         progress_bar_single_task_percentage = 100/count_checkboxes_checked()
 
@@ -380,6 +463,10 @@ def start_installation():
         #zablokowanie checboxów na czas instalacji
         checkbox_all_set_state("disabled")
         for checkbox in checkboxes:
+            # stop install event
+            if stop_event.is_set():
+                stop_event.clear()
+                break;
             #jeśli checkbox jest zaznaczony
             if checkbox["var"].get():
                 current_task_label["text"] = checkbox['checkbox'].cget("text") #aktualizacja labelki
@@ -395,11 +482,16 @@ def start_installation():
                 progress_bar.update()
                 checkbox['checkbox'].deselect()
 
+        progress_bar["value"] = 0
+        progress_bar.update()
         current_task_label["text"] = "Brak zadań."
         current_task_label.update()
+        stop_install_button["state"] = "disabled"
         checkbox_all_set_state("normal")
         show_message("Zakończono instalację!")
-
+        
+            
+    
     t = threading.Thread(target=execute_install)
     t.start()
     
@@ -414,9 +506,10 @@ def start_benchmark():
         'Epic Games Store',
         'Ubisoft Connect',
         'DirectX 9',
+        'Rivatuner',
+        'CapFrameX',
         'Windows Terminal',
         'Kopiuj BenchmarkTools na pulpit',
-        'Instaluj lokalne oprogramowanie',
         'Usuń bloatware z Windows',
         'CPU-Z',
         'GPU-Z',
@@ -452,7 +545,7 @@ ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 oznacza SW_HIDE
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.3.1")
+root.title("Winstaller 0.4")
 
 # Ustawienie rozmiaru okna
 root.geometry("700x600")
@@ -471,7 +564,10 @@ frame2.pack(side="left", padx=10)
 
 # tworzenie przycisku "Rozpocznij instalację!"
 install_button = tk.Button(left_frame, text="Uruchom!", command=start_installation, font=("OpenSans", 18))
-install_button.pack(pady=50)
+install_button.pack(pady=10)
+stop_event = threading.Event()
+stop_install_button = tk.Button(left_frame, text="Stop", command=stop_installation, font=("OpenSans", 12), state="disabled")
+stop_install_button.pack(pady=10)
 
 # tworzenie przycisku "benchmark starter"
 benchmark_button = tk.Button(left_frame, text="benchmark starter", command=start_benchmark, font=("OpenSans", 18))
@@ -497,7 +593,7 @@ progress_bar.pack(pady=10)
 
 counter = 0
 for checkbox in checkbox_function:
-    if counter < 15:
+    if counter < 20:
         create_checkbox(checkbox, frame1)
     else:
         create_checkbox(checkbox, frame2)
