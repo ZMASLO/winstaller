@@ -194,51 +194,7 @@ def windows_dark_mode():
     winreg.CloseKey(key)
 
 def uninstall_onedrive():
-    key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\OneDrive")
-    winreg.SetValueEx(key, "DisableFileSyncNGSC", 0, winreg.REG_DWORD, 1)
-
-    subprocess.run(["taskkill", "/F", "/IM", "OneDrive.exe"])
-
-    time.sleep(2)
-
-    onedrive = os.path.join(os.environ['SYSTEMROOT'], "SysWOW64", "OneDriveSetup.exe")
-    if not os.path.exists(onedrive):
-        onedrive = os.path.join(os.environ['SYSTEMROOT'], "System32", "OneDriveSetup.exe")
-
-    subprocess.run([onedrive, "/uninstall"], check=True)
-
-    time.sleep(2)
-
-    subprocess.run(["taskkill", "/F", "/IM", "explorer.exe"])
-
-    time.sleep(2)
-
-    shutil.rmtree(os.path.join(os.environ['USERPROFILE'], "OneDrive"), ignore_errors=True)
-    shutil.rmtree(os.path.join(os.environ['LOCALAPPDATA'], "Microsoft", "OneDrive"), ignore_errors=True)
-    shutil.rmtree(os.path.join(os.environ['PROGRAMDATA'], "Microsoft OneDrive"), ignore_errors=True)
-    shutil.rmtree(os.path.join(os.environ['SYSTEMDRIVE'], "OneDriveTemp"), ignore_errors=True)
-
-    try:
-        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, r"CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}")
-    except OSError:
-        pass
-
-    try:
-        winreg.DeleteKey(winreg.HKEY_CLASSES_ROOT, r"Wow6432Node\CLSID\{018D5C66-4533-4307-9B53-224DE2ED1FE6}")
-    except OSError:
-        pass
-    
-    winreg.CloseKey(key)
-    subprocess.run(["explorer.exe"])
-
-def install_onedrive():
-    try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Policies\Microsoft\Windows\OneDrive", 0, winreg.KEY_WRITE) as key:
-            winreg.DeleteValue(key, "DisableFileSyncNGSC")
-    except: 
-        pass
-
-    os.system(os.path.join(os.environ["systemroot"], "SysWOW64", "OneDriveSetup.exe"))
+    subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , "Microsoft.OneDrive"])
 
 def reboot_to_bios():
     subprocess.run(["shutdown.exe", "-t", "0", "-r", "-fw"])
@@ -387,7 +343,6 @@ checkbox_function = {
     "Ciemny motyw Windows": windows_dark_mode,
     "Jasny motyw Windows": windows_light_mode,
     "Odinstaluj OneDrive": uninstall_onedrive,
-    "Instaluj OneDrive": install_onedrive,
     "Restart i uruchom BIOS": reboot_to_bios,
     "Restart i zaawansowane uruchamianie": reboot_to_advanced_startup,
     "TEST BOX": test_box,
@@ -516,6 +471,7 @@ def start_benchmark():
         'Ciemny motyw Windows',
         'Blender',
         'Kopiuj winstaller na pulpit',
+        'Odinstaluj OneDrive',
     ]
     #zaznacza checkboxy określone w tablicy
     for checkbox_name in checkboxes_to_check:
@@ -545,7 +501,7 @@ ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 oznacza SW_HIDE
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.4")
+root.title("Winstaller 0.4.1")
 
 # Ustawienie rozmiaru okna
 root.geometry("700x600")
