@@ -111,6 +111,12 @@ def install_davinci_resolve_studio():
     url="https://swr.cloud.blackmagicdesign.com/DaVinciResolve/v18.6.5/DaVinci_Resolve_Studio_18.6.5_Windows.zip?verify=1708895095-TEqnC2EHHPvdHDdozxSY6zGdK39AtvRBeavKupsCxz8%3D"
     download_unzip_install(url, ["/i", "/q", "/noreboot"])    
 
+def install_lm_studio():
+    winget_install("LMStudio.LMStudio")
+
+def install_ul_procyon():
+    subprocess.run([os.getcwd()+"\\procyon\\procyon-setup.exe", "/silent"])
+
 def copy_benchmark_tools():
     copy_directory_to_desktop("BenchmarkTools")
 
@@ -196,11 +202,14 @@ def windows_dark_mode():
 def uninstall_onedrive():
     subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , "Microsoft.OneDrive"])
 
+def generate_battery_report():
+    subprocess.run(["powercfg", "-batteryreport"])
+
 def reboot_to_bios():
-    subprocess.run(["shutdown.exe", "-t", "0", "-r", "-fw"])
+    subprocess.run(["shutdown.exe", "-t", "1", "-r", "-fw"])
 
 def reboot_to_advanced_startup():
-    subprocess.run(["shutdown.exe", "-t", "0", "-r", "-o"])
+    subprocess.run(["shutdown.exe", "-t", "1", "-r", "-o"])
 
 def install_blender():
     winget_install("BlenderFoundation.Blender")
@@ -336,6 +345,8 @@ checkbox_function = {
     "Creative Cloud": install_creativecloud,
     "DisplayCal": install_displaycal,
     "MSI Afterburner": install_msi_afterburner,
+    "LM Studio": install_lm_studio,
+    "Ul Procyon": install_ul_procyon,
     "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools,
     "Kopiuj winstaller na pulpit": copy_winstaller,
     "Instaluj lokalne oprogramowanie": install_local_software,
@@ -343,9 +354,10 @@ checkbox_function = {
     "Ciemny motyw Windows": windows_dark_mode,
     "Jasny motyw Windows": windows_light_mode,
     "Odinstaluj OneDrive": uninstall_onedrive,
+    "Generuj raport z baterii": generate_battery_report,
     "Restart i uruchom BIOS": reboot_to_bios,
     "Restart i zaawansowane uruchamianie": reboot_to_advanced_startup,
-    "TEST BOX": test_box,
+    # "TEST BOX": test_box,
     
     }
     
@@ -404,7 +416,7 @@ def show_message(message):
 def stop_installation():
     stop_event.set()
     stop_install_button["state"] = "disabled"
-    show_message("Zatrzymuję instalację...")
+    show_message("Zatrzymuję zadania...")
 
 
 def start_installation():
@@ -430,7 +442,7 @@ def start_installation():
                     #wywołanie funkcji instalacyjnej przypisanej w słowniku checkbox_function
                     checkbox_function[checkbox['checkbox'].cget("text")]()
                 except Exception as e:
-                    show_message("Problem podczas instalacji "+checkbox['checkbox'].cget("text")+"\n"+str(e))
+                    show_message("Problem podczas wykonania "+checkbox['checkbox'].cget("text")+"\n"+str(e))
                     
                 #aktualizacja paska postępu
                 progress_bar["value"] = progress_bar["value"] + progress_bar_single_task_percentage
@@ -443,7 +455,7 @@ def start_installation():
         current_task_label.update()
         stop_install_button["state"] = "disabled"
         checkbox_all_set_state("normal")
-        show_message("Zakończono instalację!")
+        show_message("Zakończono zadania!")
         
             
     
@@ -472,6 +484,8 @@ def start_benchmark():
         'Blender',
         'Kopiuj winstaller na pulpit',
         'Odinstaluj OneDrive',
+        'LM Studio',
+        'UL Procyon'
     ]
     #zaznacza checkboxy określone w tablicy
     for checkbox_name in checkboxes_to_check:
@@ -501,7 +515,7 @@ ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 oznacza SW_HIDE
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.4.1")
+root.title("Winstaller 0.4.2")
 
 # Ustawienie rozmiaru okna
 root.geometry("700x600")
