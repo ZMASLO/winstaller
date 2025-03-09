@@ -3,11 +3,10 @@ import sys
 import shutil
 import ctypes
 import subprocess
-import tkinter as tk
 import customtkinter as ctk
-import darkdetect
+# import darkdetect
 import winreg
-import time
+# import time
 import threading
 import ctypes
 import requests
@@ -128,7 +127,7 @@ class ModernApp(ctk.CTk):
             pass
 
     def create_checkbox(self, name):
-        var = tk.BooleanVar()
+        var = ctk.BooleanVar()
         checkbox = ctk.CTkCheckBox(self.scrollable_frame, text=name, variable=var)
         checkbox.pack(pady=2, padx=10, anchor="w")
         checkbox_data = {"var": var, "checkbox": checkbox}
@@ -292,12 +291,9 @@ class ModernDialog(ctk.CTkToplevel):
 
 def show_message(message):
     # Funkcja wyświetlająca okno dialogowe z informacją w stylu aplikacji
-    if 'app' in globals():
-        dialog = ModernDialog(app, message)
-        dialog.wait_window()
-    else:
-        # Fallback dla przypadków gdy aplikacja jeszcze nie istnieje
-        messagebox.showinfo("Informacja", message)
+    dialog = ModernDialog(app, message)
+    dialog.wait_window()
+
 
 def is_admin():
     try:
@@ -613,14 +609,6 @@ def remove_bloat():
         subprocess.run(["powershell.exe", "-Command", "Get-AppxPackage *"+bloat+"* | Remove-AppxPackage"])
 
 
-def log_toggle():
-    if log_button["text"] == "pokaż logi":
-        ctypes.windll.user32.ShowWindow(hwnd, 1)
-        log_button["text"]="ukryj logi"
-    else:
-        ctypes.windll.user32.ShowWindow(hwnd, 0)
-        log_button["text"]="pokaż logi"
-
 checkboxes = []
 checkbox_function = {
     "Google Chrome": install_google_chrome,
@@ -665,35 +653,6 @@ checkbox_function = {
     }
     
 
-def create_checkbox(name, frame):
-    var = tk.BooleanVar()
-    checkbox = ctk.CTkCheckBox(frame, text=name, variable=var)
-    checkbox.pack(pady=2, padx=10, anchor="w")
-    checkbox_data = {"var": var, "checkbox": checkbox}
-    checkboxes.append(checkbox_data)
-
-def count_checkboxes_checked():
-    counter = 0
-    for checkbox in checkboxes:
-        if checkbox["var"].get():
-            counter = counter + 1
-    
-    return counter
-
-def uncheck_all_checkboxes():
-    for checkbox in checkboxes:
-        if checkbox["var"].get():
-            checkbox['checkbox'].deselect()
-
-def checkbox_all_set_state(state):
-    for checkbox in checkboxes:
-        checkbox['checkbox']['state'] = state
-
-def check_checkbox(name):
-    for checkbox in checkboxes:
-        if checkbox['checkbox'].cget("text") == name:
-            checkbox['checkbox'].select()
-
 def copy_file_to_desktop(file_name):
     user_home = os.path.expanduser("~")
     dest_path = os.path.join(user_home, "Desktop")
@@ -724,6 +683,8 @@ if __name__ == "__main__":
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, sys.argv[0], None, 1)
         sys.exit()
 
+    app = ModernApp()
+    
     if not check_winget_installed():
         show_message("Instalowanie winget!")
         try:
@@ -731,8 +692,6 @@ if __name__ == "__main__":
         except Exception as e:
             show_message("Problem podczas instalacji winget "+str(e))
 
-    app = ModernApp()
-    
     # Tworzenie checkboxów
     for checkbox in checkbox_function:
         app.create_checkbox(checkbox)
