@@ -1,0 +1,1 @@
+# Plik inicjalizacyjny pakietu core 
