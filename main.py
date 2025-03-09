@@ -46,27 +46,27 @@ class ModernApp(ctk.CTk):
         
         # Logo
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="Winstaller", font=ctk.CTkFont(size=20, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 5))
         
         # Przyciski w panelu bocznym
         self.install_button = ctk.CTkButton(self.sidebar_frame, text="Uruchom!", command=self.start_installation)
-        self.install_button.grid(row=1, column=0, padx=20, pady=10)
+        self.install_button.grid(row=1, column=0, padx=20, pady=5)
         
         self.stop_button = ctk.CTkButton(self.sidebar_frame, text="Stop", command=self.stop_installation, state="disabled")
-        self.stop_button.grid(row=2, column=0, padx=20, pady=10)
+        self.stop_button.grid(row=2, column=0, padx=20, pady=5)
         
         self.benchmark_button = ctk.CTkButton(self.sidebar_frame, text="Benchmark starter", command=self.start_benchmark)
-        self.benchmark_button.grid(row=3, column=0, padx=20, pady=10)
+        self.benchmark_button.grid(row=3, column=0, padx=20, pady=5)
         
         self.uncheck_button = ctk.CTkButton(self.sidebar_frame, text="Odznacz wszystkie", command=self.uncheck_all_checkboxes)
-        self.uncheck_button.grid(row=4, column=0, padx=20, pady=10)
+        self.uncheck_button.grid(row=4, column=0, padx=20, pady=5)
         
         # Separator i etykieta "Specjalne"
         self.separator = ctk.CTkFrame(self.sidebar_frame, height=1)
-        self.separator.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
+        self.separator.grid(row=5, column=0, padx=20, pady=5, sticky="ew")
         
         self.special_label = ctk.CTkLabel(self.sidebar_frame, text="Specjalne:", font=ctk.CTkFont(size=14))
-        self.special_label.grid(row=6, column=0, padx=20, pady=(0, 10))
+        self.special_label.grid(row=6, column=0, padx=20, pady=(0, 5))
         
         # Przyciski w sekcji specjalne
         self.bios_button = ctk.CTkButton(
@@ -87,7 +87,7 @@ class ModernApp(ctk.CTk):
                 reboot_to_advanced_startup
             )
         )
-        self.advanced_boot_button.grid(row=8, column=0, padx=20, pady=5)
+        self.advanced_boot_button.grid(row=8, column=0, padx=20, pady=5,)
         
         self.battery_button = ctk.CTkButton(self.sidebar_frame, text="Raport baterii", command=generate_battery_report)
         self.battery_button.grid(row=9, column=0, padx=20, pady=5)
