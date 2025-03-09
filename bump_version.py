@@ -10,12 +10,21 @@ def get_current_version():
     try:
         return subprocess.check_output(['git', 'describe', '--tags', '--abbrev=0']).decode().strip()
     except:
+        # Jeśli nie ma tagów, spróbuj pobrać domyślną wersję z version.py
+        with open("core/version.py", "r", encoding="utf-8") as f:
+            content = f.read()
+            match = re.search(r'return "(\d+\.\d+\.\d+)"', content)
+            if match:
+                return match.group(1)
         return "0.0.0"
 
 def check_uncommitted_changes():
     """Sprawdza czy są niezacommitowane zmiany."""
-    status = subprocess.check_output(['git', 'status', '--porcelain']).decode().strip()
-    return bool(status)
+    try:
+        status = subprocess.check_output(['git', 'status', '--porcelain']).decode().strip()
+        return bool(status)
+    except:
+        return False
 
 def bump_version(current_version, bump_type):
     """Zwiększa numer wersji zgodnie z typem (major, minor, patch)."""
@@ -35,10 +44,25 @@ def bump_version(current_version, bump_type):
 
 def create_changelog_entry(version, changes):
     """Tworzy wpis w CHANGELOG.md."""
-    with open("CHANGELOG.md", "a") as f:
+    with open("CHANGELOG.md", "a", encoding="utf-8") as f:
         f.write(f"\n## [{version}] - {datetime.now().strftime('%Y-%m-%d')}\n")
         for change in changes:
             f.write(f"- {change}\n")
+
+def update_version_file(new_version):
+    """Aktualizuje domyślną wersję w pliku core/version.py."""
+    with open("core/version.py", "r", encoding="utf-8") as f:
+        content = f.read()
+    
+    # Aktualizuj domyślną wersję
+    updated_content = re.sub(
+        r'return "(\d+\.\d+\.\d+)"',
+        f'return "{new_version}"',
+        content
+    )
+    
+    with open("core/version.py", "w", encoding="utf-8") as f:
+        f.write(updated_content)
 
 def main():
     if len(sys.argv) < 2:
@@ -70,12 +94,18 @@ def main():
     # Utwórz wpis w CHANGELOG.md
     create_changelog_entry(new_version, changes)
     
-    # Utwórz nowy tag
-    subprocess.run(['git', 'tag', '-a', new_version, '-m', f'Wersja {new_version}'])
+    try:
+        # Spróbuj utworzyć tag git
+        subprocess.run(['git', 'tag', '-a', new_version, '-m', f'Wersja {new_version}'])
+        print(f"Zaktualizowano wersję z {current_version} do {new_version}")
+        print("Nie zapomnij wypchnąć zmian i tagów na serwer:")
+        print("git push && git push --tags")
+    except:
+        print("Nie można utworzyć taga git - prawdopodobnie nie jesteśmy w repozytorium git")
     
-    print(f"Zaktualizowano wersję z {current_version} do {new_version}")
-    print("Nie zapomnij wypchnąć zmian i tagów na serwer:")
-    print("git push && git push --tags")
+    # Zawsze aktualizuj plik version.py
+    update_version_file(new_version)
+    print(f"Zaktualizowano domyślną wersję w core/version.py do {new_version}")
 
 if __name__ == "__main__":
     main() 

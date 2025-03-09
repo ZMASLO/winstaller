@@ -6,6 +6,7 @@ import customtkinter as ctk
 from gui.dialogs import ModernConfirmDialog, show_message
 from core.config import APP_CONFIG, CATEGORIES, CHECKBOX_FUNCTIONS, BENCHMARK_PROGRAMS
 from core.system_utils import reboot_to_bios, reboot_to_advanced_startup, generate_battery_report
+from core.updater import check_for_updates
 
 class ModernApp(ctk.CTk):
     def __init__(self):
@@ -105,24 +106,32 @@ class ModernApp(ctk.CTk):
         
         self.battery_button = ctk.CTkButton(self.sidebar_frame, text="Raport baterii", command=generate_battery_report, width=160)
         self.battery_button.grid(row=9, column=0, padx=20, pady=5)
+
+        self.update_button = ctk.CTkButton(
+            self.sidebar_frame,
+            text="Sprawdź aktualizacje",
+            command=lambda: check_for_updates(self),
+            width=160
+        )
+        self.update_button.grid(row=10, column=0, padx=20, pady=5)
         
         # Pusty wiersz z wagą 1 (elastyczny odstęp)
-        self.sidebar_frame.grid_rowconfigure(10, weight=1)
+        self.sidebar_frame.grid_rowconfigure(11, weight=1)
         
         # Etykiety i pasek postępu
         self.task_label = ctk.CTkLabel(self.sidebar_frame, text="Postęp zadań:")
-        self.task_label.grid(row=11, column=0, padx=20, pady=(20, 0))
+        self.task_label.grid(row=12, column=0, padx=20, pady=(20, 0))
         
         self.current_task_label = ctk.CTkLabel(self.sidebar_frame, text="Brak zadań.")
-        self.current_task_label.grid(row=12, column=0, padx=20, pady=(5, 10))
+        self.current_task_label.grid(row=13, column=0, padx=20, pady=(5, 10))
         
         self.progress_bar = ctk.CTkProgressBar(self.sidebar_frame)
-        self.progress_bar.grid(row=13, column=0, padx=20, pady=(0, 10))
+        self.progress_bar.grid(row=14, column=0, padx=20, pady=(0, 10))
         self.progress_bar.set(0)
         
         # Przycisk logów
         self.log_button = ctk.CTkButton(self.sidebar_frame, text="Pokaż logi", command=self.log_toggle, width=160)
-        self.log_button.grid(row=14, column=0, padx=20, pady=(0, 20))
+        self.log_button.grid(row=15, column=0, padx=20, pady=(0, 20))
 
     def _create_main_area(self):
         # Główny kontener na checkboxy

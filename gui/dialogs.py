@@ -117,6 +117,85 @@ class ModernConfirmDialog(ctk.CTkToplevel):
         self.destroy()
         callback()
 
+class ModernUpdateDialog(ctk.CTkToplevel):
+    def __init__(self, parent, current_version, new_version, on_yes):
+        super().__init__(parent)
+        
+        # Konfiguracja okna
+        self.title("Dostępna aktualizacja")
+        
+        # Wycentrowanie okna względem rodzica
+        window_width = 400
+        window_height = 300
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        x = parent_x + (parent_width - window_width) // 2
+        y = parent_y + (parent_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # Ustawienia okna
+        self.resizable(False, False)
+        self.grab_set()  # Okno modalne
+        self.attributes('-alpha', 0.98)
+        
+        # Kontener na treść
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        
+        # Ikona aktualizacji (emoji)
+        self.update_icon = ctk.CTkLabel(
+            self,
+            text="🔄",
+            font=("Segoe UI", 32)
+        )
+        self.update_icon.grid(row=0, column=0, columnspan=2, pady=(20, 0))
+        
+        # Wiadomość
+        message = f"Dostępna jest nowa wersja programu!\n\n" \
+                 f"Obecna wersja: {current_version}\n" \
+                 f"Nowa wersja: {new_version}\n\n" \
+                 f"Czy chcesz zaktualizować program?"
+        
+        self.message_label = ctk.CTkLabel(
+            self,
+            text=message,
+            wraplength=350,
+            font=("Segoe UI", 12)
+        )
+        self.message_label.grid(row=1, column=0, columnspan=2, padx=20, pady=(10, 20))
+        
+        # Przyciski
+        self.yes_button = ctk.CTkButton(
+            self,
+            text="Aktualizuj",
+            width=120,
+            command=lambda: self.on_button_click(on_yes)
+        )
+        self.yes_button.grid(row=2, column=1, padx=20, pady=(0, 20))
+        
+        self.no_button = ctk.CTkButton(
+            self,
+            text="Później",
+            width=120,
+            command=self.destroy
+        )
+        self.no_button.grid(row=2, column=0, padx=20, pady=(0, 20))
+        
+        # Fokus na przycisk Później
+        self.no_button.focus()
+        
+        # Obsługa klawiszy
+        self.bind("<Return>", lambda e: self.on_button_click(on_yes))
+        self.bind("<Escape>", lambda e: self.destroy())
+        
+    def on_button_click(self, callback):
+        self.destroy()
+        callback()
+
 def show_message(parent, message):
     dialog = ModernDialog(parent, message)
     dialog.wait_window() 

@@ -26,3 +26,5 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.5] - 2025-03-09
 - fix encoding error when installing via winget
+- simplyfy versioning
+- fix displaying wrong version info when without git env
