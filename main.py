@@ -79,7 +79,7 @@ def install_rivatuner():
     download_unzip_install(url, ["/S"])
 
 def install_capframex():
-    url="https://cxblobs.blob.core.windows.net/releases/release_1.7.2_installer.zip"
+    url="https://github.com/CXWorld/CapFrameX/releases/download/v1.7.4_release/release_1.7.4_installer.zip"
     download_unzip_install(url, ["/S"])
 
 def install_hw_info():
@@ -515,7 +515,7 @@ ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 oznacza SW_HIDE
 root = tk.Tk()
 
 # Dodanie tytułu do okna
-root.title("Winstaller 0.4.2")
+root.title("Winstaller 0.4.3")
 
 # Ustawienie rozmiaru okna
 root.geometry("700x600")
