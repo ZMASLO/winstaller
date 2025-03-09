@@ -20,3 +20,6 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.3] - 2025-03-09
 - test zmian
+
+## [1.0.4] - 2025-03-09
+- prepare for update script
