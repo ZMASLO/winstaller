@@ -26,7 +26,7 @@ class ModernApp(ctk.CTk):
             user32.ShowWindow(self.hwnd, 0)
             
         # Podstawowa konfiguracja okna
-        self.title("Winstaller 1.0.0")
+        self.title("Winstaller 1.0.1")
         self.geometry("600x750")  # Zwiększamy wysokość okna
         
         # Ustawienie przezroczystości okna (wartość od 0.0 do 1.0)
@@ -159,10 +159,18 @@ class ModernApp(ctk.CTk):
         def flush(self):
             pass
 
+    def create_category_label(self, name):
+        label = ctk.CTkLabel(
+            self.scrollable_frame,
+            text=name,
+            font=ctk.CTkFont(size=14, weight="bold")
+        )
+        label.pack(pady=(15, 5), padx=10, anchor="w")
+
     def create_checkbox(self, name):
         var = ctk.BooleanVar()
         checkbox = ctk.CTkCheckBox(self.scrollable_frame, text=name, variable=var)
-        checkbox.pack(pady=2, padx=10, anchor="w")
+        checkbox.pack(pady=2, padx=25, anchor="w")  # Zwiększony padding z lewej dla hierarchii
         checkbox_data = {"var": var, "checkbox": checkbox}
         self.checkboxes.append(checkbox_data)
 
@@ -793,8 +801,52 @@ if __name__ == "__main__":
         except Exception as e:
             show_message("Problem podczas instalacji winget "+str(e))
 
-    # Tworzenie checkboxów
-    for checkbox in checkbox_function:
-        app.create_checkbox(checkbox)
+    app.create_category_label("Podstawowe programy")
+    app.create_checkbox("Google Chrome")
+    app.create_checkbox("Telegram")
+    app.create_checkbox("Messenger")
+    app.create_checkbox("Discord")
+    app.create_checkbox("TeamSpeak3")
+    app.create_checkbox("7-Zip")
+    app.create_checkbox("Windows Terminal")
+
+    app.create_category_label("Launchery")
+    app.create_checkbox("Steam")
+    app.create_checkbox("Epic Games Store")
+    app.create_checkbox("Ubisoft Connect")
+    app.create_checkbox("EA Desktop")
+    app.create_checkbox("Battle.net")
+
+    app.create_category_label("Narzędzia diagnostyczne")
+    app.create_checkbox("HW Monitor")
+    app.create_checkbox("HW Info")
+    app.create_checkbox("CPU-Z")
+    app.create_checkbox("GPU-Z")
+    app.create_checkbox("DisplayCal")
+    app.create_checkbox("NVCleanstall")
+    
+    app.create_category_label("Narzędzia testowe")
+    app.create_checkbox("DirectX 9")
+    app.create_checkbox("MSI Afterburner")
+    app.create_checkbox("Rivatuner")
+    app.create_checkbox("CapFrameX")
+    app.create_checkbox("UL Procyon")
+    
+    app.create_category_label("Aplikacje profesjonalne")
+    app.create_checkbox("Davinci Resolve Studio")
+    app.create_checkbox("Creative Cloud")
+    app.create_checkbox("Blender")
+    app.create_checkbox("LM Studio")
+    
+    app.create_category_label("Konfiguracja systemu")
+    app.create_checkbox("Usuń bloatware z Windows")
+    app.create_checkbox("Ciemny motyw Windows")
+    app.create_checkbox("Jasny motyw Windows")
+    app.create_checkbox("Odinstaluj OneDrive")
+    
+    app.create_category_label("Dodatkowe")
+    app.create_checkbox("Kopiuj BenchmarkTools na pulpit")
+    app.create_checkbox("Kopiuj winstaller na pulpit")
+    app.create_checkbox("Instaluj lokalne oprogramowanie")
     
     app.mainloop()
