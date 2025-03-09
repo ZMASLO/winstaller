@@ -1,5 +1,14 @@
 from core.installers import *
 from core.system_utils import *
+from core.version import get_version_info
+
+# Konfiguracja aplikacji
+APP_CONFIG = {
+    "title": get_version_info(),
+    "window_size": "600x750",
+    "window_alpha": 0.98,
+    "sidebar_width": 200
+}
 
 # Struktura kategorii i checkboxów
 CATEGORIES = {
@@ -82,12 +91,4 @@ BENCHMARK_PROGRAMS = [
     'LM Studio',
     'UL Procyon',
     'DisplayDriverUninstaller',
-]
-
-# Konfiguracja aplikacji
-APP_CONFIG = {
-    "title": "Winstaller 1.0.1",
-    "window_size": "600x750",
-    "window_alpha": 0.98,
-    "sidebar_width": 200
-} 
+] 
