@@ -23,3 +23,6 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.4] - 2025-03-09
 - prepare for update script
+
+## [1.0.5] - 2025-03-09
+- fix encoding error when installing via winget
