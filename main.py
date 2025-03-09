@@ -612,7 +612,8 @@ def uninstall_onedrive():
     subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , "Microsoft.OneDrive"])
 
 def generate_battery_report():
-    subprocess.run(["powercfg", "-batteryreport"])
+    result = subprocess.run(["powercfg", "-batteryreport"])
+    print(result)
 
 def reboot_to_bios():
     subprocess.run(["shutdown.exe", "-t", "1", "-r", "-fw"])
@@ -745,6 +746,61 @@ def winget_install(name):
     print(f"Zakończono instalację {name}\n")
     
 
+# Struktura kategorii i checkboxów
+CATEGORIES = {
+    "Podstawowe programy": {
+        "Google Chrome": install_google_chrome,
+        "Telegram": install_telegram,
+        "Messenger": install_messenger,
+        "Discord": install_discord,
+        "TeamSpeak3": install_ts3,
+        "7-Zip": install_7zip,
+        "Windows Terminal": install_windows_terminal
+    },
+    "Launchery": {
+        "Steam": install_steam,
+        "Epic Games Store": install_epic_games_store,
+        "Ubisoft Connect": install_ubisoft_connect,
+        "EA Desktop": install_ea_desktop,
+        "Battle.net": install_battle_net
+    },
+    "Narzędzia diagnostyczne": {
+        "HW Monitor": install_hw_monitor,
+        "HW Info": install_hw_info,
+        "CPU-Z": install_cpuz,
+        "GPU-Z": install_gpuz,
+        "DisplayCal": install_displaycal,
+        "NVCleanstall": install_nvcleanstall
+    },
+    "Narzędzia testowe": {
+        "DirectX 9": install_directx9,
+        "MSI Afterburner": install_msi_afterburner,
+        "Rivatuner": install_rivatuner,
+        "CapFrameX": install_capframex,
+        "UL Procyon": install_ul_procyon
+    },
+    "Aplikacje profesjonalne": {
+        "Davinci Resolve Studio": install_davinci_resolve_studio,
+        "Creative Cloud": install_creativecloud,
+        "Blender": install_blender,
+        "LM Studio": install_lm_studio
+    },
+    "Konfiguracja systemu": {
+        "Usuń bloatware z Windows": remove_bloat,
+        "Ciemny motyw Windows": windows_dark_mode,
+        "Jasny motyw Windows": windows_light_mode,
+        "Odinstaluj OneDrive": uninstall_onedrive
+    },
+    "Dodatkowe": {
+        "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools,
+        "Kopiuj winstaller na pulpit": copy_winstaller,
+        "Instaluj lokalne oprogramowanie": install_local_software
+    }
+}
+
+# Słownik funkcji jest generowany automatycznie z kategorii
+checkbox_function = {name: func for category in CATEGORIES.values() for name, func in category.items()}
+
 if __name__ == "__main__":
     if not is_admin():
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, sys.argv[0], None, 1)
@@ -759,52 +815,10 @@ if __name__ == "__main__":
         except Exception as e:
             show_message("Problem podczas instalacji winget "+str(e))
 
-    app.create_category_label("Podstawowe programy")
-    app.create_checkbox("Google Chrome")
-    app.create_checkbox("Telegram")
-    app.create_checkbox("Messenger")
-    app.create_checkbox("Discord")
-    app.create_checkbox("TeamSpeak3")
-    app.create_checkbox("7-Zip")
-    app.create_checkbox("Windows Terminal")
-
-    app.create_category_label("Launchery")
-    app.create_checkbox("Steam")
-    app.create_checkbox("Epic Games Store")
-    app.create_checkbox("Ubisoft Connect")
-    app.create_checkbox("EA Desktop")
-    app.create_checkbox("Battle.net")
-
-    app.create_category_label("Narzędzia diagnostyczne")
-    app.create_checkbox("HW Monitor")
-    app.create_checkbox("HW Info")
-    app.create_checkbox("CPU-Z")
-    app.create_checkbox("GPU-Z")
-    app.create_checkbox("DisplayCal")
-    app.create_checkbox("NVCleanstall")
-    
-    app.create_category_label("Narzędzia testowe")
-    app.create_checkbox("DirectX 9")
-    app.create_checkbox("MSI Afterburner")
-    app.create_checkbox("Rivatuner")
-    app.create_checkbox("CapFrameX")
-    app.create_checkbox("UL Procyon")
-    
-    app.create_category_label("Aplikacje profesjonalne")
-    app.create_checkbox("Davinci Resolve Studio")
-    app.create_checkbox("Creative Cloud")
-    app.create_checkbox("Blender")
-    app.create_checkbox("LM Studio")
-    
-    app.create_category_label("Konfiguracja systemu")
-    app.create_checkbox("Usuń bloatware z Windows")
-    app.create_checkbox("Ciemny motyw Windows")
-    app.create_checkbox("Jasny motyw Windows")
-    app.create_checkbox("Odinstaluj OneDrive")
-    
-    app.create_category_label("Dodatkowe")
-    app.create_checkbox("Kopiuj BenchmarkTools na pulpit")
-    app.create_checkbox("Kopiuj winstaller na pulpit")
-    app.create_checkbox("Instaluj lokalne oprogramowanie")
+    # Generowanie interfejsu z kategorii
+    for category_name, items in CATEGORIES.items():
+        app.create_category_label(category_name)
+        for item_name in items:
+            app.create_checkbox(item_name)
     
     app.mainloop()
