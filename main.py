@@ -4,9 +4,7 @@ import shutil
 import ctypes
 import subprocess
 import customtkinter as ctk
-# import darkdetect
 import winreg
-# import time
 import threading
 import ctypes
 import requests
@@ -44,7 +42,7 @@ class ModernApp(ctk.CTk):
         # Panel boczny
         self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        self.sidebar_frame.grid_rowconfigure(5, weight=1)
         
         # Logo
         self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="Winstaller", font=ctk.CTkFont(size=20, weight="bold"))
@@ -63,8 +61,8 @@ class ModernApp(ctk.CTk):
         self.uncheck_button = ctk.CTkButton(self.sidebar_frame, text="Odznacz wszystkie", command=self.uncheck_all_checkboxes)
         self.uncheck_button.grid(row=4, column=0, padx=20, pady=10)
         
-        self.log_button = ctk.CTkButton(self.sidebar_frame, text="Pokaż logi", command=self.log_toggle)
-        self.log_button.grid(row=5, column=0, padx=20, pady=10)
+        # Pusty wiersz z wagą 1 (elastyczny odstęp)
+        self.sidebar_frame.grid_rowconfigure(5, weight=1)
         
         # Etykiety i pasek postępu
         self.task_label = ctk.CTkLabel(self.sidebar_frame, text="Postęp zadań:")
@@ -74,8 +72,12 @@ class ModernApp(ctk.CTk):
         self.current_task_label.grid(row=7, column=0, padx=20, pady=(5, 10))
         
         self.progress_bar = ctk.CTkProgressBar(self.sidebar_frame)
-        self.progress_bar.grid(row=8, column=0, padx=20, pady=(0, 20))
+        self.progress_bar.grid(row=8, column=0, padx=20, pady=(0, 10))
         self.progress_bar.set(0)
+        
+        # Przycisk logów przeniesiony pod pasek postępu
+        self.log_button = ctk.CTkButton(self.sidebar_frame, text="Pokaż logi", command=self.log_toggle)
+        self.log_button.grid(row=9, column=0, padx=20, pady=(0, 20))
         
         # Główny kontener na checkboxy
         self.main_container = ctk.CTkFrame(self)
@@ -609,6 +611,32 @@ def remove_bloat():
         subprocess.run(["powershell.exe", "-Command", "Get-AppxPackage *"+bloat+"* | Remove-AppxPackage"])
 
 
+
+def copy_file_to_desktop(file_name):
+    user_home = os.path.expanduser("~")
+    dest_path = os.path.join(user_home, "Desktop")
+    shutil.copy(file_name, dest_path)
+
+def copy_directory_to_desktop(dir):
+    user_home = os.path.expanduser("~")
+    dest_path = os.path.join(user_home, "Desktop", dir)
+    if (os.path.exists(dir) and os.path.isdir(dir)):
+        shutil.copytree(dir, dest_path)
+    else:
+        raise Exception("Folder BenchmarkTools nie istnieje!")
+    
+    
+def winget_install(name):
+    print(f"Instalowanie {name}...")
+    result = subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , name], 
+                          capture_output=True, 
+                          text=True)
+    print(result.stdout)
+    if result.stderr:
+        print("Błędy:", result.stderr)
+    print(f"Zakończono instalację {name}\n")
+
+
 checkboxes = []
 checkbox_function = {
     "Google Chrome": install_google_chrome,
@@ -652,31 +680,6 @@ checkbox_function = {
     
     }
     
-
-def copy_file_to_desktop(file_name):
-    user_home = os.path.expanduser("~")
-    dest_path = os.path.join(user_home, "Desktop")
-    shutil.copy(file_name, dest_path)
-
-def copy_directory_to_desktop(dir):
-    user_home = os.path.expanduser("~")
-    dest_path = os.path.join(user_home, "Desktop", dir)
-    if (os.path.exists(dir) and os.path.isdir(dir)):
-        shutil.copytree(dir, dest_path)
-    else:
-        raise Exception("Folder BenchmarkTools nie istnieje!")
-    
-    
-def winget_install(name):
-    print(f"Instalowanie {name}...")
-    result = subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , name], 
-                          capture_output=True, 
-                          text=True)
-    print(result.stdout)
-    if result.stderr:
-        print("Błędy:", result.stderr)
-    print(f"Zakończono instalację {name}\n")
-
 
 if __name__ == "__main__":
     if not is_admin():
