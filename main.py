@@ -743,48 +743,6 @@ def winget_install(name):
     if result.stderr:
         print("Błędy:", result.stderr)
     print(f"Zakończono instalację {name}\n")
-
-
-checkboxes = []
-checkbox_function = {
-    "Google Chrome": install_google_chrome,
-    "Telegram": install_telegram,
-    "Messenger": install_messenger,
-    "Discord": install_discord,
-    "TeamSpeak3": install_ts3,
-    "Steam": install_steam,
-    "Epic Games Store": install_epic_games_store,
-    "Ubisoft Connect": install_ubisoft_connect,
-    "EA Desktop": install_ea_desktop,
-    "Battle.net": install_battle_net,
-    "Windows Terminal": install_windows_terminal,
-    "DirectX 9": install_directx9,
-    "Rivatuner": install_rivatuner,
-    "CapFrameX": install_capframex,
-    "HW Monitor": install_hw_monitor,
-    "HW Info": install_hw_info,
-    "7-Zip": install_7zip,
-    "NVCleanstall": install_nvcleanstall,
-    "CPU-Z": install_cpuz,
-    "GPU-Z": install_gpuz,
-    "Blender": install_blender,
-    "Davinci Resolve Studio": install_davinci_resolve_studio,
-    "Creative Cloud": install_creativecloud,
-    "DisplayCal": install_displaycal,
-    "MSI Afterburner": install_msi_afterburner,
-    "LM Studio": install_lm_studio,
-    "Ul Procyon": install_ul_procyon,
-    "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools,
-    "Kopiuj winstaller na pulpit": copy_winstaller,
-    "Instaluj lokalne oprogramowanie": install_local_software,
-    "Usuń bloatware z Windows": remove_bloat,
-    "Ciemny motyw Windows": windows_dark_mode,
-    "Jasny motyw Windows": windows_light_mode,
-    "Odinstaluj OneDrive": uninstall_onedrive,
-
-    # "TEST BOX": test_box,
-    
-    }
     
 
 if __name__ == "__main__":
