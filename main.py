@@ -6,7 +6,6 @@ import subprocess
 import tkinter as tk
 import customtkinter as ctk
 import darkdetect
-from tkinter import messagebox
 import winreg
 import time
 import threading
@@ -238,6 +237,67 @@ class ModernApp(ctk.CTk):
             self.terminal_frame.grid_remove()
             self.log_button.configure(text="Pokaż logi")
             self.terminal_visible = False
+
+class ModernDialog(ctk.CTkToplevel):
+    def __init__(self, parent, message):
+        super().__init__(parent)
+        
+        # Konfiguracja okna
+        self.title("Informacja")
+        
+        # Wycentrowanie okna względem rodzica
+        window_width = 400
+        window_height = 150
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        x = parent_x + (parent_width - window_width) // 2
+        y = parent_y + (parent_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # Ustawienia okna
+        self.resizable(False, False)
+        self.grab_set()  # Okno modalne
+        self.attributes('-alpha', 0.98)
+        
+        # Kontener na treść
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        
+        # Wiadomość
+        self.message_label = ctk.CTkLabel(
+            self,
+            text=message,
+            wraplength=350,
+            font=("Segoe UI", 12)
+        )
+        self.message_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        
+        # Przycisk OK
+        self.ok_button = ctk.CTkButton(
+            self,
+            text="OK",
+            width=100,
+            command=self.destroy
+        )
+        self.ok_button.grid(row=1, column=0, padx=20, pady=(0, 20))
+        
+        # Fokus na przycisk OK
+        self.ok_button.focus()
+        
+        # Obsługa klawisza Enter i Escape
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+
+def show_message(message):
+    # Funkcja wyświetlająca okno dialogowe z informacją w stylu aplikacji
+    if 'app' in globals():
+        dialog = ModernDialog(app, message)
+        dialog.wait_window()
+    else:
+        # Fallback dla przypadków gdy aplikacja jeszcze nie istnieje
+        messagebox.showinfo("Informacja", message)
 
 def is_admin():
     try:
@@ -657,12 +717,6 @@ def winget_install(name):
     if result.stderr:
         print("Błędy:", result.stderr)
     print(f"Zakończono instalację {name}\n")
-
-
-def show_message(message):
-    # Funkcja wyświetlająca okno dialogowe z informacją
-    messagebox.showinfo("Informacja", message) 
-
 
 
 if __name__ == "__main__":
