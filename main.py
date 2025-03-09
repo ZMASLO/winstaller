@@ -27,7 +27,7 @@ class ModernApp(ctk.CTk):
             
         # Podstawowa konfiguracja okna
         self.title("Winstaller 1.0.0")
-        self.geometry("800x750")  # Zwiększamy wysokość okna
+        self.geometry("600x750")  # Zwiększamy wysokość okna
         
         # Ustawienie przezroczystości okna (wartość od 0.0 do 1.0)
         self.attributes('-alpha', 0.98)
@@ -61,23 +61,54 @@ class ModernApp(ctk.CTk):
         self.uncheck_button = ctk.CTkButton(self.sidebar_frame, text="Odznacz wszystkie", command=self.uncheck_all_checkboxes)
         self.uncheck_button.grid(row=4, column=0, padx=20, pady=10)
         
+        # Separator i etykieta "Specjalne"
+        self.separator = ctk.CTkFrame(self.sidebar_frame, height=1)
+        self.separator.grid(row=5, column=0, padx=20, pady=10, sticky="ew")
+        
+        self.special_label = ctk.CTkLabel(self.sidebar_frame, text="Specjalne:", font=ctk.CTkFont(size=14))
+        self.special_label.grid(row=6, column=0, padx=20, pady=(0, 10))
+        
+        # Przyciski w sekcji specjalne
+        self.bios_button = ctk.CTkButton(
+            self.sidebar_frame,
+            text="Restart do BIOS",
+            command=lambda: self.confirm_restart(
+                "Czy na pewno chcesz uruchomić ponownie komputer i wejść do BIOS-u?",
+                reboot_to_bios
+            )
+        )
+        self.bios_button.grid(row=7, column=0, padx=20, pady=5)
+        
+        self.advanced_boot_button = ctk.CTkButton(
+            self.sidebar_frame,
+            text="Restart zaawansowany",
+            command=lambda: self.confirm_restart(
+                "Czy na pewno chcesz uruchomić ponownie komputer w trybie zaawansowanym?",
+                reboot_to_advanced_startup
+            )
+        )
+        self.advanced_boot_button.grid(row=8, column=0, padx=20, pady=5)
+        
+        self.battery_button = ctk.CTkButton(self.sidebar_frame, text="Raport baterii", command=generate_battery_report)
+        self.battery_button.grid(row=9, column=0, padx=20, pady=5)
+        
         # Pusty wiersz z wagą 1 (elastyczny odstęp)
-        self.sidebar_frame.grid_rowconfigure(5, weight=1)
+        self.sidebar_frame.grid_rowconfigure(10, weight=1)
         
         # Etykiety i pasek postępu
         self.task_label = ctk.CTkLabel(self.sidebar_frame, text="Postęp zadań:")
-        self.task_label.grid(row=6, column=0, padx=20, pady=(20, 0))
+        self.task_label.grid(row=11, column=0, padx=20, pady=(20, 0))
         
         self.current_task_label = ctk.CTkLabel(self.sidebar_frame, text="Brak zadań.")
-        self.current_task_label.grid(row=7, column=0, padx=20, pady=(5, 10))
+        self.current_task_label.grid(row=12, column=0, padx=20, pady=(5, 10))
         
         self.progress_bar = ctk.CTkProgressBar(self.sidebar_frame)
-        self.progress_bar.grid(row=8, column=0, padx=20, pady=(0, 10))
+        self.progress_bar.grid(row=13, column=0, padx=20, pady=(0, 10))
         self.progress_bar.set(0)
         
         # Przycisk logów przeniesiony pod pasek postępu
         self.log_button = ctk.CTkButton(self.sidebar_frame, text="Pokaż logi", command=self.log_toggle)
-        self.log_button.grid(row=9, column=0, padx=20, pady=(0, 20))
+        self.log_button.grid(row=14, column=0, padx=20, pady=(0, 20))
         
         # Główny kontener na checkboxy
         self.main_container = ctk.CTkFrame(self)
@@ -239,6 +270,10 @@ class ModernApp(ctk.CTk):
             self.log_button.configure(text="Pokaż logi")
             self.terminal_visible = False
 
+    def confirm_restart(self, message, callback):
+        dialog = ModernConfirmDialog(self, message, callback)
+        dialog.wait_window()
+
 class ModernDialog(ctk.CTkToplevel):
     def __init__(self, parent, message):
         super().__init__(parent)
@@ -290,6 +325,71 @@ class ModernDialog(ctk.CTkToplevel):
         # Obsługa klawisza Enter i Escape
         self.bind("<Return>", lambda e: self.destroy())
         self.bind("<Escape>", lambda e: self.destroy())
+
+class ModernConfirmDialog(ctk.CTkToplevel):
+    def __init__(self, parent, message, on_yes):
+        super().__init__(parent)
+        
+        # Konfiguracja okna
+        self.title("Potwierdzenie")
+        
+        # Wycentrowanie okna względem rodzica
+        window_width = 400
+        window_height = 150
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        x = parent_x + (parent_width - window_width) // 2
+        y = parent_y + (parent_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # Ustawienia okna
+        self.resizable(False, False)
+        self.grab_set()  # Okno modalne
+        self.attributes('-alpha', 0.98)
+        
+        # Kontener na treść
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        
+        # Wiadomość
+        self.message_label = ctk.CTkLabel(
+            self,
+            text=message,
+            wraplength=350,
+            font=("Segoe UI", 12)
+        )
+        self.message_label.grid(row=0, column=0, columnspan=2, padx=20, pady=(20, 10))
+        
+        # Przyciski
+        self.yes_button = ctk.CTkButton(
+            self,
+            text="Tak",
+            width=100,
+            command=lambda: self.on_button_click(on_yes)
+        )
+        self.yes_button.grid(row=1, column=1, padx=20, pady=(0, 20))
+        
+        self.no_button = ctk.CTkButton(
+            self,
+            text="Nie",
+            width=100,
+            command=self.destroy
+        )
+        self.no_button.grid(row=1, column=0, padx=20, pady=(0, 20))
+        
+        # Fokus na przycisk Nie
+        self.no_button.focus()
+        
+        # Obsługa klawiszy
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+        
+    def on_button_click(self, callback):
+        self.destroy()
+        callback()
 
 def show_message(message):
     # Funkcja wyświetlająca okno dialogowe z informacją w stylu aplikacji
@@ -673,9 +773,7 @@ checkbox_function = {
     "Ciemny motyw Windows": windows_dark_mode,
     "Jasny motyw Windows": windows_light_mode,
     "Odinstaluj OneDrive": uninstall_onedrive,
-    "Generuj raport z baterii": generate_battery_report,
-    "Restart i uruchom BIOS": reboot_to_bios,
-    "Restart i zaawansowane uruchamianie": reboot_to_advanced_startup,
+
     # "TEST BOX": test_box,
     
     }
