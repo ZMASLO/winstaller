@@ -4,7 +4,8 @@ import shutil
 import ctypes
 import subprocess
 import tkinter as tk
-from tkinter import ttk
+import customtkinter as ctk
+import darkdetect
 from tkinter import messagebox
 import winreg
 import time
@@ -12,6 +13,231 @@ import threading
 import ctypes
 import requests
 import zipfile
+
+# Konfiguracja motywu
+ctk.set_appearance_mode("system")  # Automatyczne dostosowanie do motywu systemu
+ctk.set_default_color_theme("blue")  # Motyw kolorystyczny Windows 11
+
+class ModernApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        
+        # Ukrycie konsoli systemowej
+        kernel32 = ctypes.WinDLL('kernel32')
+        user32 = ctypes.WinDLL('user32')
+        self.hwnd = kernel32.GetConsoleWindow()
+        if self.hwnd != 0:
+            user32.ShowWindow(self.hwnd, 0)
+            
+        # Podstawowa konfiguracja okna
+        self.title("Winstaller 1.0.0")
+        self.geometry("800x750")  # Zwiększamy wysokość okna
+        
+        # Ustawienie przezroczystości okna (wartość od 0.0 do 1.0)
+        self.attributes('-alpha', 0.98)
+        
+        # Konfiguracja kolorów
+        self._set_appearance_mode("system")
+        
+        # Tworzenie głównego kontenera
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        
+        # Panel boczny
+        self.sidebar_frame = ctk.CTkFrame(self, width=200, corner_radius=0)
+        self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew")
+        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        
+        # Logo
+        self.logo_label = ctk.CTkLabel(self.sidebar_frame, text="Winstaller", font=ctk.CTkFont(size=20, weight="bold"))
+        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        
+        # Przyciski w panelu bocznym
+        self.install_button = ctk.CTkButton(self.sidebar_frame, text="Uruchom!", command=self.start_installation)
+        self.install_button.grid(row=1, column=0, padx=20, pady=10)
+        
+        self.stop_button = ctk.CTkButton(self.sidebar_frame, text="Stop", command=self.stop_installation, state="disabled")
+        self.stop_button.grid(row=2, column=0, padx=20, pady=10)
+        
+        self.benchmark_button = ctk.CTkButton(self.sidebar_frame, text="Benchmark starter", command=self.start_benchmark)
+        self.benchmark_button.grid(row=3, column=0, padx=20, pady=10)
+        
+        self.uncheck_button = ctk.CTkButton(self.sidebar_frame, text="Odznacz wszystkie", command=self.uncheck_all_checkboxes)
+        self.uncheck_button.grid(row=4, column=0, padx=20, pady=10)
+        
+        self.log_button = ctk.CTkButton(self.sidebar_frame, text="Pokaż logi", command=self.log_toggle)
+        self.log_button.grid(row=5, column=0, padx=20, pady=10)
+        
+        # Etykiety i pasek postępu
+        self.task_label = ctk.CTkLabel(self.sidebar_frame, text="Postęp zadań:")
+        self.task_label.grid(row=6, column=0, padx=20, pady=(20, 0))
+        
+        self.current_task_label = ctk.CTkLabel(self.sidebar_frame, text="Brak zadań.")
+        self.current_task_label.grid(row=7, column=0, padx=20, pady=(5, 10))
+        
+        self.progress_bar = ctk.CTkProgressBar(self.sidebar_frame)
+        self.progress_bar.grid(row=8, column=0, padx=20, pady=(0, 20))
+        self.progress_bar.set(0)
+        
+        # Główny kontener na checkboxy
+        self.main_container = ctk.CTkFrame(self)
+        self.main_container.grid(row=0, column=1, sticky="nsew")
+        self.main_container.grid_columnconfigure(0, weight=1)
+        self.main_container.grid_rowconfigure(0, weight=1)
+        
+        # Jeden kontener na checkboxy
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.main_container, width=500)
+        self.scrollable_frame.grid(row=0, column=0, padx=20, pady=20, sticky="nsew")
+        
+        # Terminal frame
+        self.terminal_visible = False
+        self.terminal_frame = ctk.CTkFrame(self.main_container, height=200)
+        self.terminal_frame.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="ew")
+        self.terminal_frame.grid_remove()  # Ukrywamy na start
+        
+        # Terminal output
+        self.terminal_output = ctk.CTkTextbox(self.terminal_frame, height=150)
+        self.terminal_output.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        self.terminal_frame.grid_columnconfigure(0, weight=1)
+        
+        # Lista checkboxów
+        self.checkboxes = []
+        
+        # Event do zatrzymywania instalacji
+        self.stop_event = threading.Event()
+        
+        # Przekierowanie stdout i stderr do terminala
+        self.stdout_redirector = self.TerminalRedirector(self.terminal_output)
+        self.stderr_redirector = self.TerminalRedirector(self.terminal_output)
+        sys.stdout = self.stdout_redirector
+        sys.stderr = self.stderr_redirector
+        
+        # Początkowy komunikat w terminalu
+        print("Winstaller 1.0.0 - gotowy do pracy\n")
+
+    class TerminalRedirector:
+        def __init__(self, text_widget):
+            self.text_widget = text_widget
+            
+        def write(self, str):
+            self.text_widget.configure(state="normal")
+            self.text_widget.insert("end", str)
+            self.text_widget.see("end")
+            self.text_widget.configure(state="disabled")
+            
+        def flush(self):
+            pass
+
+    def create_checkbox(self, name):
+        var = tk.BooleanVar()
+        checkbox = ctk.CTkCheckBox(self.scrollable_frame, text=name, variable=var)
+        checkbox.pack(pady=2, padx=10, anchor="w")
+        checkbox_data = {"var": var, "checkbox": checkbox}
+        self.checkboxes.append(checkbox_data)
+
+    def count_checkboxes_checked(self):
+        counter = 0
+        for checkbox in self.checkboxes:
+            if checkbox["var"].get():
+                counter = counter + 1
+        return counter
+
+    def uncheck_all_checkboxes(self):
+        for checkbox in self.checkboxes:
+            if checkbox["var"].get():
+                checkbox['checkbox'].deselect()
+
+    def checkbox_all_set_state(self, state):
+        for checkbox in self.checkboxes:
+            checkbox['checkbox']['state'] = state
+
+    def check_checkbox(self, name):
+        for checkbox in self.checkboxes:
+            if checkbox['checkbox'].cget("text") == name:
+                checkbox['checkbox'].select()
+
+    def start_installation(self):
+        self.progress_bar.set(0)  # resetowanie paska postępu
+        self.stop_button.configure(state="normal")
+
+        if self.count_checkboxes_checked():
+            progress_bar_single_task_percentage = 100/self.count_checkboxes_checked()
+
+        def execute_install():
+            #zablokowanie checboxów na czas instalacji
+            self.checkbox_all_set_state("disabled")
+            for checkbox in self.checkboxes:
+                # stop install event
+                if self.stop_event.is_set():
+                    self.stop_event.clear()
+                    break
+                #jeśli checkbox jest zaznaczony
+                if checkbox["var"].get():
+                    self.current_task_label.configure(text=checkbox['checkbox'].cget("text")) #aktualizacja labelki
+                    self.current_task_label.update()
+                    try:
+                        #wywołanie funkcji instalacyjnej przypisanej w słowniku checkbox_function
+                        checkbox_function[checkbox['checkbox'].cget("text")]()
+                    except Exception as e:
+                        show_message("Problem podczas wykonania "+checkbox['checkbox'].cget("text")+"\n"+str(e))
+                        
+                    #aktualizacja paska postępu
+                    self.progress_bar.set(self.progress_bar.get() + progress_bar_single_task_percentage/100)
+                    self.progress_bar.update()
+                    checkbox['checkbox'].deselect()
+
+            self.progress_bar.set(0)
+            self.progress_bar.update()
+            self.current_task_label.configure(text="Brak zadań.")
+            self.current_task_label.update()
+            self.stop_button.configure(state="disabled")
+            self.checkbox_all_set_state("normal")
+            show_message("Zakończono zadania!")
+        
+        t = threading.Thread(target=execute_install)
+        t.start()
+
+    def stop_installation(self):
+        self.stop_event.set()
+        self.stop_button.configure(state="disabled")
+        show_message("Zatrzymuję zadania...")
+
+    def start_benchmark(self):
+        checkboxes_to_check = [
+            'HW Monitor',
+            '7-Zip',
+            'HW Info',
+            'Google Chrome',
+            'Steam',
+            'Epic Games Store',
+            'Ubisoft Connect',
+            'DirectX 9',
+            'Rivatuner',
+            'CapFrameX',
+            'Windows Terminal',
+            'Kopiuj BenchmarkTools na pulpit',
+            'Usuń bloatware z Windows',
+            'CPU-Z',
+            'GPU-Z',
+            'Ciemny motyw Windows',
+            'Blender',
+            'Kopiuj winstaller na pulpit',
+            'Odinstaluj OneDrive',
+            'LM Studio',
+            'UL Procyon'
+        ]
+        for checkbox_name in checkboxes_to_check:
+            self.check_checkbox(checkbox_name)
+
+    def log_toggle(self):
+        if not self.terminal_visible:
+            self.terminal_frame.grid()
+            self.log_button.configure(text="Ukryj logi")
+            self.terminal_visible = True
+        else:
+            self.terminal_frame.grid_remove()
+            self.log_button.configure(text="Pokaż logi")
+            self.terminal_visible = False
 
 def is_admin():
     try:
@@ -124,11 +350,13 @@ def copy_winstaller():
     copy_file_to_desktop("winstaller.exe")
 
 def download_install(url, install_parameters):
+    print(f"Pobieranie z {url}...")
     install_file = "install.exe"
     response = requests.get(url)
     if response.status_code == 200:
         with open(install_file, 'wb') as file:
             file.write(response.content)
+        print("Pobrano plik instalacyjny")
 
         # array for adding install parameters array
         install = []
@@ -136,20 +364,28 @@ def download_install(url, install_parameters):
         for install_parameter in install_parameters:
             install.append(install_parameter)
         
-        subprocess.run(install)
+        print("Uruchamianie instalatora...")
+        result = subprocess.run(install, capture_output=True, text=True)
+        print(result.stdout)
+        if result.stderr:
+            print("Błędy:", result.stderr)
 
-        # delete afeter install
+        # delete after install
         os.remove(install_file)
+        print("Zakończono instalację\n")
     else:
-        raise Exception("Błąd pobierania "+response.status_code)    
+        raise Exception("Błąd pobierania "+str(response.status_code))
 
 def download_unzip_install(url, install_parameters):
+    print(f"Pobieranie z {url}...")
     zip_file = "install.zip"
     response = requests.get(url)
     if response.status_code == 200:
         with open(zip_file, 'wb') as file:
             file.write(response.content)
+        print("Pobrano plik ZIP")
 
+        print("Rozpakowywanie...")
         with zipfile.ZipFile("install.zip", 'r') as zip_ref:
             zip_ref.extractall("install_extracted")
 
@@ -158,19 +394,26 @@ def download_unzip_install(url, install_parameters):
 
         #find install exe in extracted directory
         install_file=find_exe(os.getcwd()+"\\install_extracted")
-        
-        # array for adding install parameters array
-        install = []
-        install.insert(0, os.getcwd()+"\\install_extracted\\"+install_file)
-        for install_parameter in install_parameters:
-            install.append(install_parameter)
-        
-        subprocess.run(install)
+        if install_file:
+            print(f"Znaleziono plik instalacyjny: {install_file}")
+            
+            # array for adding install parameters array
+            install = []
+            install.insert(0, os.getcwd()+"\\install_extracted\\"+install_file)
+            for install_parameter in install_parameters:
+                install.append(install_parameter)
+            
+            print("Uruchamianie instalatora...")
+            result = subprocess.run(install, capture_output=True, text=True)
+            print(result.stdout)
+            if result.stderr:
+                print("Błędy:", result.stderr)
 
         # delete extracted directory
         shutil.rmtree("install_extracted")
+        print("Zakończono instalację\n")
     else:
-        raise Exception("Błąd pobierania "+response.status_code)
+        raise Exception("Błąd pobierania "+str(response.status_code))
 
 def find_exe(dir):
     for file in os.listdir(dir):
@@ -364,9 +607,9 @@ checkbox_function = {
 
 def create_checkbox(name, frame):
     var = tk.BooleanVar()
-    checkbox= tk.Checkbutton(frame, text=name, variable=var)
-    checkbox.pack()
-    checkbox_data =  {"var": var, "checkbox": checkbox}
+    checkbox = ctk.CTkCheckBox(frame, text=name, variable=var)
+    checkbox.pack(pady=2, padx=10, anchor="w")
+    checkbox_data = {"var": var, "checkbox": checkbox}
     checkboxes.append(checkbox_data)
 
 def count_checkboxes_checked():
@@ -406,169 +649,38 @@ def copy_directory_to_desktop(dir):
     
     
 def winget_install(name):
-    subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , name])
+    print(f"Instalowanie {name}...")
+    result = subprocess.run(["winget", "install", "-e", "--silent" ,"--accept-package-agreements", "--accept-source-agreements" , name], 
+                          capture_output=True, 
+                          text=True)
+    print(result.stdout)
+    if result.stderr:
+        print("Błędy:", result.stderr)
+    print(f"Zakończono instalację {name}\n")
 
 
 def show_message(message):
     # Funkcja wyświetlająca okno dialogowe z informacją
     messagebox.showinfo("Informacja", message) 
 
-def stop_installation():
-    stop_event.set()
-    stop_install_button["state"] = "disabled"
-    show_message("Zatrzymuję zadania...")
 
 
-def start_installation():
-    progress_bar["value"] = 0  # resetowanie paska postępu
-    stop_install_button["state"] = "normal"
+if __name__ == "__main__":
+    if not is_admin():
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, sys.argv[0], None, 1)
+        sys.exit()
 
-    if count_checkboxes_checked():
-        progress_bar_single_task_percentage = 100/count_checkboxes_checked()
+    if not check_winget_installed():
+        show_message("Instalowanie winget!")
+        try:
+            subprocess.run(["powershell", "-Command", "Add-AppxPackage https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"])
+        except Exception as e:
+            show_message("Problem podczas instalacji winget "+str(e))
 
-    def execute_install():
-        #zablokowanie checboxów na czas instalacji
-        checkbox_all_set_state("disabled")
-        for checkbox in checkboxes:
-            # stop install event
-            if stop_event.is_set():
-                stop_event.clear()
-                break;
-            #jeśli checkbox jest zaznaczony
-            if checkbox["var"].get():
-                current_task_label["text"] = checkbox['checkbox'].cget("text") #aktualizacja labelki
-                current_task_label.update()
-                try:
-                    #wywołanie funkcji instalacyjnej przypisanej w słowniku checkbox_function
-                    checkbox_function[checkbox['checkbox'].cget("text")]()
-                except Exception as e:
-                    show_message("Problem podczas wykonania "+checkbox['checkbox'].cget("text")+"\n"+str(e))
-                    
-                #aktualizacja paska postępu
-                progress_bar["value"] = progress_bar["value"] + progress_bar_single_task_percentage
-                progress_bar.update()
-                checkbox['checkbox'].deselect()
-
-        progress_bar["value"] = 0
-        progress_bar.update()
-        current_task_label["text"] = "Brak zadań."
-        current_task_label.update()
-        stop_install_button["state"] = "disabled"
-        checkbox_all_set_state("normal")
-        show_message("Zakończono zadania!")
-        
-            
+    app = ModernApp()
     
-    t = threading.Thread(target=execute_install)
-    t.start()
+    # Tworzenie checkboxów
+    for checkbox in checkbox_function:
+        app.create_checkbox(checkbox)
     
-
-def start_benchmark():
-    checkboxes_to_check =[
-        'HW Monitor',
-        '7-Zip',
-        'HW Info',
-        'Google Chrome',
-        'Steam',
-        'Epic Games Store',
-        'Ubisoft Connect',
-        'DirectX 9',
-        'Rivatuner',
-        'CapFrameX',
-        'Windows Terminal',
-        'Kopiuj BenchmarkTools na pulpit',
-        'Usuń bloatware z Windows',
-        'CPU-Z',
-        'GPU-Z',
-        'Ciemny motyw Windows',
-        'Blender',
-        'Kopiuj winstaller na pulpit',
-        'Odinstaluj OneDrive',
-        'LM Studio',
-        'UL Procyon'
-    ]
-    #zaznacza checkboxy określone w tablicy
-    for checkbox_name in checkboxes_to_check:
-        check_checkbox(checkbox_name)
-
-
-if not is_admin():
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, sys.argv[0], None, 1)
-    sys.exit()
-
-# Sprawdzenie czy jest zainstalowany winget
-
-if not check_winget_installed():
-    show_message("Instalowanie winget!")
-    
-    # Instalowanie programu
-    try:
-        subprocess.run(["powershell", "-Command", "Add-AppxPackage https://github.com/microsoft/winget-cli/releases/latest/download/Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle"])
-    except Exception as e:
-        show_message("Problem podczas instalacji winget "+str(e))
-
-#ukrycie konsoli z logami
-hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-ctypes.windll.user32.ShowWindow(hwnd, 0)  # 0 oznacza SW_HIDE
-
-# Tworzenie głównego okna
-root = tk.Tk()
-
-# Dodanie tytułu do okna
-root.title("Winstaller 0.4.3")
-
-# Ustawienie rozmiaru okna
-root.geometry("700x600")
-
-# tworzenie ramki na lewo od okna głównego
-left_frame = tk.Frame(root, bg="darkgray", padx=10)
-left_frame.pack(side="left", fill="y")
-
-#tworzenie trzech kolumn na checkboxy
-frame1 = tk.Frame(root)
-frame1.pack(side="left", padx=10)
-frame2 = tk.Frame(root)
-frame2.pack(side="left", padx=10)
-# frame3 = tk.Frame(root)
-# frame3.pack(side="left", padx=10)
-
-# tworzenie przycisku "Rozpocznij instalację!"
-install_button = tk.Button(left_frame, text="Uruchom!", command=start_installation, font=("OpenSans", 18))
-install_button.pack(pady=10)
-stop_event = threading.Event()
-stop_install_button = tk.Button(left_frame, text="Stop", command=stop_installation, font=("OpenSans", 12), state="disabled")
-stop_install_button.pack(pady=10)
-
-# tworzenie przycisku "benchmark starter"
-benchmark_button = tk.Button(left_frame, text="benchmark starter", command=start_benchmark, font=("OpenSans", 18))
-benchmark_button.pack(pady=20)
-
-uncheck_button = tk.Button(left_frame, text="odznacz wszystkie", command=uncheck_all_checkboxes, font=("OpenSans", 12))
-uncheck_button.pack(pady=20)
-
-log_button = tk.Button(left_frame, text="pokaż logi", command=log_toggle, font=("OpenSans",12))
-log_button.pack()
-
-#Etykieta
-task_label = tk.Label(left_frame, text="Postęp zadań:", bg="darkgray")
-task_label.pack(pady=10)
-
-#Etykieta obecnego zadania
-current_task_label = tk.Label(left_frame, text="Brak zadań.", bg="darkgray")
-current_task_label.pack(pady=10)
-
-# Dodanie paska postępu
-progress_bar = ttk.Progressbar(left_frame, orient="horizontal", length=200, mode="determinate")
-progress_bar.pack(pady=10)
-
-counter = 0
-for checkbox in checkbox_function:
-    if counter < 20:
-        create_checkbox(checkbox, frame1)
-    else:
-        create_checkbox(checkbox, frame2)
-    counter = counter + 1
-
-
-# Uruchomienie pętli zdarzeń okna
-root.mainloop()
+    app.mainloop()
