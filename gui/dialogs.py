@@ -196,6 +196,62 @@ class ModernUpdateDialog(ctk.CTkToplevel):
         self.destroy()
         callback()
 
+class ModernProgressDialog(ctk.CTkToplevel):
+    def __init__(self, parent, title="Postęp"):
+        super().__init__(parent)
+        
+        # Konfiguracja okna
+        self.title(title)
+        
+        # Wycentrowanie okna względem rodzica
+        window_width = 400
+        window_height = 150
+        parent_x = parent.winfo_x()
+        parent_y = parent.winfo_y()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        x = parent_x + (parent_width - window_width) // 2
+        y = parent_y + (parent_height - window_height) // 2
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        
+        # Ustawienia okna
+        self.resizable(False, False)
+        self.grab_set()  # Okno modalne
+        self.attributes('-alpha', 0.98)
+        
+        # Kontener na treść
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        
+        # Etykieta statusu
+        self.status_label = ctk.CTkLabel(
+            self,
+            text="Przygotowywanie...",
+            font=("Segoe UI", 12)
+        )
+        self.status_label.grid(row=0, column=0, padx=20, pady=(20, 10))
+        
+        # Pasek postępu
+        self.progress_bar = ctk.CTkProgressBar(self)
+        self.progress_bar.grid(row=1, column=0, padx=20, pady=(0, 10), sticky="ew")
+        self.progress_bar.set(0)
+        
+        # Etykieta z procentami
+        self.percent_label = ctk.CTkLabel(
+            self,
+            text="0%",
+            font=("Segoe UI", 10)
+        )
+        self.percent_label.grid(row=2, column=0, padx=20, pady=(0, 20))
+    
+    def update_progress(self, progress, status=None):
+        """Aktualizuje pasek postępu i status."""
+        self.progress_bar.set(progress)
+        self.percent_label.configure(text=f"{int(progress * 100)}%")
+        if status:
+            self.status_label.configure(text=status)
+        self.update()
+
 def show_message(parent, message):
     dialog = ModernDialog(parent, message)
     dialog.wait_window() 

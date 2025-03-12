@@ -28,3 +28,8 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - fix encoding error when installing via winget
 - simplyfy versioning
 - fix displaying wrong version info when without git env
+
+## [1.1.1] - 2025-03-12
+- checkbox lock during installation
+- fix LMStudio installation package
+- add progress bar when downloading update

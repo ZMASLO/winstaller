@@ -207,7 +207,7 @@ def install_davinci_resolve_studio():
     download_unzip_install(url, ["/i", "/q", "/noreboot"])    
 
 def install_lm_studio():
-    winget_install("LMStudio.LMStudio")
+    winget_install("ElementLabs.LMStudio")
 
 def install_ul_procyon():
     subprocess.run([os.getcwd()+"\\procyon\\procyon-setup.exe", "/silent"])

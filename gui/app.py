@@ -193,7 +193,7 @@ class ModernApp(ctk.CTk):
 
     def checkbox_all_set_state(self, state):
         for checkbox in self.checkboxes:
-            checkbox['checkbox']['state'] = state
+            checkbox['checkbox'].configure(state=state)
 
     def check_checkbox(self, name):
         for checkbox in self.checkboxes:

@@ -4,7 +4,7 @@ import sys
 import requests
 import subprocess
 from core.version import get_version
-from gui.dialogs import ModernUpdateDialog, show_message
+from gui.dialogs import ModernUpdateDialog, ModernProgressDialog, show_message
 
 GITHUB_REPO = "ZMASLO/winstaller"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -19,18 +19,32 @@ def get_latest_release_info():
     except:
         return None
 
-def download_file(url, filename):
-    """Pobiera plik z podanego URL."""
+def download_file(url, filename, progress_dialog=None):
+    """Pobiera plik z podanego URL z obsługą postępu."""
     try:
         response = requests.get(url, stream=True)
         if response.status_code == 200:
+            # Pobierz całkowity rozmiar pliku
+            total_size = int(response.headers.get('content-length', 0))
+            block_size = 8192
+            downloaded = 0
+            
             with open(filename, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=block_size):
                     if chunk:
                         f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_dialog and total_size:
+                            progress = downloaded / total_size
+                            progress_dialog.update_progress(
+                                progress,
+                                f"Pobieranie: {downloaded}/{total_size} bajtów"
+                            )
             return True
         return False
-    except:
+    except Exception as e:
+        if progress_dialog:
+            progress_dialog.update_progress(0, f"Błąd: {str(e)}")
         return False
 
 def check_for_updates(parent):
@@ -55,23 +69,31 @@ def check_for_updates(parent):
                 new_exe = "winstaller_new.exe"
                 update_script = "update.bat"
                 
-                if download_file(asset['browser_download_url'], new_exe):
+                # Utwórz okno postępu
+                progress_dialog = ModernProgressDialog(parent, "Aktualizacja")
+                progress_dialog.update_progress(0, "Rozpoczynanie pobierania...")
+                
+                if download_file(asset['browser_download_url'], new_exe, progress_dialog):
+                    progress_dialog.update_progress(1, "Tworzenie skryptu aktualizacyjnego...")
                     # Utwórz skrypt bat do wykonania aktualizacji
-                    with open(update_script, 'w') as f:
+                    with open(update_script, 'w', encoding='utf-8') as f:
                         f.write('@echo off\n')
+                        f.write('echo Aktualizacja w toku...\n')
                         f.write('timeout /t 2 /nobreak\n')  # Poczekaj 2 sekundy
                         f.write(f'del "{sys.executable}"\n')  # Usuń stary plik
                         f.write(f'move /y "{new_exe}" "{sys.executable}"\n')  # Przenieś nowy plik
                         f.write(f'start "" "{sys.executable}"\n')  # Uruchom nową wersję
                         f.write(f'del "%~f0"\n')  # Usuń skrypt bat
                     
+                    progress_dialog.update_progress(1, "Uruchamianie aktualizacji...")
                     # Uruchom skrypt aktualizacyjny
-                    subprocess.Popen(['cmd', '/c', update_script])
+                    subprocess.Popen(['cmd', '/c', update_script], creationflags=subprocess.CREATE_NEW_CONSOLE)
                     sys.exit(0)
-                
-                show_message(parent, "Błąd podczas pobierania aktualizacji.")
-                return False
-    
+                else:
+                    progress_dialog.destroy()
+                    show_message(parent, "Błąd podczas pobierania aktualizacji.")
+                    return False
+
     dialog = ModernUpdateDialog(parent, current_version, latest_version, on_update_confirmed)
     dialog.wait_window()
     return False 
