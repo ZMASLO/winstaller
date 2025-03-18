@@ -49,7 +49,7 @@ def download_file(url, filename, progress_dialog=None):
 
 def check_for_updates(parent):
     """Sprawdza dostępność aktualizacji i pobiera nową wersję jeśli jest dostępna."""
-    current_version = get_version().replace('-dev', '')
+    current_version = get_version()
     release_info = get_latest_release_info()
     
     if not release_info:

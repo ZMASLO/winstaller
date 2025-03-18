@@ -3,6 +3,7 @@ import subprocess
 import requests
 import zipfile
 import shutil
+import sys
 
 def winget_install(name):
     print(f"Instalowanie {name}...")
@@ -175,7 +176,8 @@ def install_rivatuner():
     winget_install("Guru3D.RTSS")
 
 def install_capframex():
-   winget_install("CXWorld.CapFrameX")
+    url="https://github.com/CXWorld/CapFrameX/releases/download/v1.7.4_release/release_1.7.4_installer.zip"
+    download_unzip_install(url, ["/S"])
 
 def install_hw_info():
     winget_install("REALiX.HWiNFO")
@@ -227,7 +229,8 @@ def copy_benchmark_tools():
 
 def copy_winstaller():
     from core.system_utils import copy_file_to_desktop
-    copy_file_to_desktop("winstaller.exe")
+    winstaller_name = sys.executable
+    copy_file_to_desktop(winstaller_name)
 
 def uninstall_onedrive():
     winget_uninstall("Microsoft.OneDrive") 

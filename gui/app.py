@@ -7,6 +7,7 @@ from gui.dialogs import ModernConfirmDialog, show_message
 from core.config import APP_CONFIG, CATEGORIES, CHECKBOX_FUNCTIONS, BENCHMARK_PROGRAMS
 from core.system_utils import reboot_to_bios, reboot_to_advanced_startup, generate_battery_report
 from core.updater import check_for_updates
+from core.version import get_version_info
 
 class ModernApp(ctk.CTk):
     def __init__(self):
@@ -49,7 +50,7 @@ class ModernApp(ctk.CTk):
         sys.stderr = self.stderr_redirector
         
         # Początkowy komunikat w terminalu
-        print("Winstaller 1.0.0 - gotowy do pracy\n")
+        print(get_version_info()+" - gotowy do pracy.\n")
 
     def _create_sidebar(self):
         # Panel boczny

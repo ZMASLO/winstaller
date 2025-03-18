@@ -33,3 +33,8 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - checkbox lock during installation
 - fix LMStudio installation package
 - add progress bar when downloading update
+
+## [1.1.2] - 2025-03-12
+- fix hardcode file name when copy to desktop
+- change install method of capframex
+- fix version display in app terminal
