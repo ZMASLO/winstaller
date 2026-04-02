@@ -154,8 +154,7 @@ def install_windows_terminal():
     winget_install("9N0DX20HK701")
 
 def install_directx9():
-    url="https://download.microsoft.com/download/1/7/1/1718CCC4-6315-4D8E-9543-8E28A4E18C4C/dxwebsetup.exe"
-    download_install(url, ["/Q"])
+    winget_install("Microsoft.DirectX")
 
 def install_rivatuner():
     winget_install("Guru3D.RTSS")

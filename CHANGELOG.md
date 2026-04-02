@@ -54,3 +54,5 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Replace backslash string concatenation with os.path.join() in installer download functions
 - copy BencmarkToolsARM64 when on ARM64
 - change CapFrameX method to winget
+- fix battlenet
+- change directx9 install to winget
