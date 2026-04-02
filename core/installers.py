@@ -161,7 +161,7 @@ def install_rivatuner():
     winget_install("Guru3D.RTSS")
 
 def install_capframex():
-    winget_install("CapFrameX.CapFrameX")
+    winget_install("CXWorld.CapFrameX")
 
 def install_hw_info():
     winget_install("REALiX.HWiNFO")
