@@ -2,6 +2,8 @@ name: Build and Draft Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
 
@@ -55,6 +57,7 @@ jobs:
     name: Create Draft Release
     needs: build
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - name: Download x64 artifact
