@@ -1,0 +1,79 @@
+name: Build and Draft Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: pyinstaller -F -n winstaller main.py
+
+      - name: Rename artifact
+        shell: bash
+        run: mv dist/winstaller.exe dist/winstaller-${{ matrix.arch }}.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winstaller-${{ matrix.arch }}
+          path: dist/winstaller-${{ matrix.arch }}.exe
+          retention-days: 1
+
+  release:
+    name: Create Draft Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: winstaller-x64
+          path: artifacts/
+
+      - name: Download arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: winstaller-arm64
+          path: artifacts/
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/winstaller-x64.exe
+            artifacts/winstaller-arm64.exe
