@@ -1,6 +1,7 @@
 """Moduł odpowiedzialny za aktualizacje programu."""
 import os
 import sys
+import platform
 import requests
 import subprocess
 from core.version import get_version
@@ -56,16 +57,19 @@ def check_for_updates(parent):
         show_message(parent, "Nie udało się sprawdzić aktualizacji.")
         return False
     
-    latest_version = release_info['tag_name']
-    
+    latest_version = release_info['tag_name'].lstrip('v')
+
     if latest_version == current_version:
         show_message(parent, "Używasz najnowszej wersji programu.")
         return False
     
     def on_update_confirmed():
-        # Pobierz asset .exe
+        # Wykryj architekturę i pobierz odpowiedni asset .exe
+        machine = platform.machine().lower()
+        arch_suffix = "arm64" if machine == "arm64" else "x64"
+
         for asset in release_info['assets']:
-            if asset['name'].endswith('.exe'):
+            if asset['name'].endswith('.exe') and arch_suffix in asset['name']:
                 new_exe = "winstaller_new.exe"
                 update_script = "update.bat"
                 
