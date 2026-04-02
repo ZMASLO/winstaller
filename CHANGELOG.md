@@ -52,3 +52,5 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Extract _center_on_parent() helper to deduplicate dialog centering logic across four dialog classes
 - Extract _THEME_REG_PATH constant shared by windows_light_mode() and windows_dark_mode()
 - Replace backslash string concatenation with os.path.join() in installer download functions
+
+## [1.1.4] - 2026-04-02
