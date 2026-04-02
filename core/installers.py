@@ -142,7 +142,7 @@ def install_ea_desktop():
     winget_install("ElectronicArts.EADesktop")
 
 def install_battle_net():
-    print("todo")
+    winget_install("Blizzard.BattleNet")
 
 def install_hw_monitor():
     winget_install("CPUID.HWMonitor")
