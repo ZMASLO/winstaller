@@ -161,8 +161,7 @@ def install_rivatuner():
     winget_install("Guru3D.RTSS")
 
 def install_capframex():
-    url="https://github.com/CXWorld/CapFrameX/releases/download/v1.7.4_release/release_1.7.4_installer.zip"
-    download_unzip_install(url, ["/S"])
+    winget_install("CapFrameX.CapFrameX")
 
 def install_hw_info():
     winget_install("REALiX.HWiNFO")
