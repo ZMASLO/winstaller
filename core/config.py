@@ -1,6 +1,10 @@
+import platform
 from core.installers import *
 from core.system_utils import *
 from core.version import get_version_info
+
+_bench_folder = "BenchmarkToolsARM64" if platform.machine().lower() == "arm64" else "BenchmarkTools"
+_bench_label = f"Kopiuj {_bench_folder} na pulpit"
 
 # Konfiguracja aplikacji
 APP_CONFIG = {
@@ -58,7 +62,7 @@ CATEGORIES = {
         "Odinstaluj OneDrive": uninstall_onedrive
     },
     "Dodatkowe": {
-        "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools,
+        _bench_label: copy_benchmark_tools,
         "Kopiuj winstaller na pulpit": copy_winstaller,
         "Instaluj lokalne oprogramowanie": install_local_software
     }
@@ -80,7 +84,7 @@ BENCHMARK_PROGRAMS = [
     'Rivatuner',
     'CapFrameX',
     'Windows Terminal',
-    'Kopiuj BenchmarkTools na pulpit',
+    _bench_label,
     'Usuń bloatware z Windows',
     'CPU-Z',
     'GPU-Z',

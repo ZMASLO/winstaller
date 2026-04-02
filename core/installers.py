@@ -209,8 +209,10 @@ def install_onedrive():
     winget_install("Microsoft.OneDrive")
 
 def copy_benchmark_tools():
+    import platform
     from core.system_utils import copy_directory_to_desktop
-    copy_directory_to_desktop("BenchmarkTools")
+    folder = "BenchmarkToolsARM64" if platform.machine().lower() == "arm64" else "BenchmarkTools"
+    copy_directory_to_desktop(folder)
 
 def copy_winstaller():
     from core.system_utils import copy_file_to_desktop
