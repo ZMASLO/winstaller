@@ -38,3 +38,6 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - fix hardcode file name when copy to desktop
 - change install method of capframex
 - fix version display in app terminal
+
+## [1.1.3] - 2026-04-02
+- updater now can determine architecture and check tag for github actions
