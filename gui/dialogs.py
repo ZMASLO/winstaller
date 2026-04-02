@@ -1,22 +1,18 @@
 import customtkinter as ctk
 
+def _center_on_parent(window, width, height):
+    parent = window.master
+    x = parent.winfo_x() + (parent.winfo_width() - width) // 2
+    y = parent.winfo_y() + (parent.winfo_height() - height) // 2
+    window.geometry(f"{width}x{height}+{x}+{y}")
+
 class ModernDialog(ctk.CTkToplevel):
     def __init__(self, parent, message):
         super().__init__(parent)
         
         # Konfiguracja okna
         self.title("Informacja")
-        
-        # Wycentrowanie okna względem rodzica
-        window_width = 400
-        window_height = 150
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-        x = parent_x + (parent_width - window_width) // 2
-        y = parent_y + (parent_height - window_height) // 2
-        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        _center_on_parent(self, 400, 150)
         
         # Ustawienia okna
         self.resizable(False, False)
@@ -58,17 +54,7 @@ class ModernConfirmDialog(ctk.CTkToplevel):
         
         # Konfiguracja okna
         self.title("Potwierdzenie")
-        
-        # Wycentrowanie okna względem rodzica
-        window_width = 400
-        window_height = 150
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-        x = parent_x + (parent_width - window_width) // 2
-        y = parent_y + (parent_height - window_height) // 2
-        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        _center_on_parent(self, 400, 150)
         
         # Ustawienia okna
         self.resizable(False, False)
@@ -123,17 +109,7 @@ class ModernUpdateDialog(ctk.CTkToplevel):
         
         # Konfiguracja okna
         self.title("Dostępna aktualizacja")
-        
-        # Wycentrowanie okna względem rodzica
-        window_width = 400
-        window_height = 300
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-        x = parent_x + (parent_width - window_width) // 2
-        y = parent_y + (parent_height - window_height) // 2
-        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        _center_on_parent(self, 400, 300)
         
         # Ustawienia okna
         self.resizable(False, False)
@@ -202,17 +178,7 @@ class ModernProgressDialog(ctk.CTkToplevel):
         
         # Konfiguracja okna
         self.title(title)
-        
-        # Wycentrowanie okna względem rodzica
-        window_width = 400
-        window_height = 150
-        parent_x = parent.winfo_x()
-        parent_y = parent.winfo_y()
-        parent_width = parent.winfo_width()
-        parent_height = parent.winfo_height()
-        x = parent_x + (parent_width - window_width) // 2
-        y = parent_y + (parent_height - window_height) // 2
-        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        _center_on_parent(self, 400, 150)
         
         # Ustawienia okna
         self.resizable(False, False)

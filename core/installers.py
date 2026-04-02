@@ -5,6 +5,14 @@ import zipfile
 import shutil
 import sys
 
+def _decode_output(raw):
+    for encoding in ['utf-8', 'cp1250', 'cp852', 'iso-8859-2']:
+        try:
+            return raw.decode(encoding) if raw else ""
+        except UnicodeDecodeError:
+            continue
+    return raw.decode('utf-8', errors='replace') if raw else ""
+
 def winget_install(name):
     print(f"Instalowanie {name}...")
     try:
@@ -15,26 +23,15 @@ def winget_install(name):
             encoding=None  # Używamy None zamiast text=True, aby otrzymać bajty
         )
         
-        # Próbujemy różne kodowania
-        for encoding in ['utf-8', 'cp1250', 'cp852', 'iso-8859-2']:
-            try:
-                stdout = result.stdout.decode(encoding) if result.stdout else ""
-                stderr = result.stderr.decode(encoding) if result.stderr else ""
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            # Jeśli żadne kodowanie nie zadziałało, użyj 'replace' aby zastąpić nieznane znaki
-            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ""
-            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ""
-        
+        stdout = _decode_output(result.stdout)
+        stderr = _decode_output(result.stderr)
         print(stdout)
         if stderr:
             print("Błędy:", stderr)
-            
+
     except Exception as e:
         print(f"Wystąpił błąd podczas instalacji {name}: {str(e)}")
-        
+
     print(f"Zakończono instalację {name}\n")
 
 def winget_uninstall(name):
@@ -44,26 +41,14 @@ def winget_uninstall(name):
         result = subprocess.run(
             ["winget", "uninstall", "--silent", name],
             capture_output=True,
-            encoding=None  # Używamy None zamiast text=True, aby otrzymać bajty
+            encoding=None
         )
-        
-        # Próbujemy różne kodowania
-        for encoding in ['utf-8', 'cp1250', 'cp852', 'iso-8859-2']:
-            try:
-                stdout = result.stdout.decode(encoding) if result.stdout else ""
-                stderr = result.stderr.decode(encoding) if result.stderr else ""
-                break
-            except UnicodeDecodeError:
-                continue
-        else:
-            # Jeśli żadne kodowanie nie zadziałało, użyj 'replace' aby zastąpić nieznane znaki
-            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ""
-            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ""
-        
+        stdout = _decode_output(result.stdout)
+        stderr = _decode_output(result.stderr)
         print(stdout)
         if stderr:
             print("Błędy:", stderr)
-            
+
     except Exception as e:
         print(f"Wystąpił błąd podczas odinstalowywania {name}: {str(e)}")
         
@@ -78,7 +63,7 @@ def download_install(url, install_parameters):
             file.write(response.content)
         print("Pobrano plik instalacyjny")
 
-        install = [os.getcwd()+"\\"+install_file] + install_parameters
+        install = [os.path.join(os.getcwd(), install_file)] + install_parameters
         
         print("Uruchamianie instalatora...")
         result = subprocess.run(install, capture_output=True, text=True)
@@ -107,11 +92,11 @@ def download_unzip_install(url, install_parameters):
         os.remove(zip_file)
 
         from core.system_utils import find_exe
-        install_file = find_exe(os.getcwd()+"\\install_extracted")
+        install_file = find_exe(os.path.join(os.getcwd(), "install_extracted"))
         if install_file:
             print(f"Znaleziono plik instalacyjny: {install_file}")
-            
-            install = [os.getcwd()+"\\install_extracted\\"+install_file] + install_parameters
+
+            install = [os.path.join(os.getcwd(), "install_extracted", install_file)] + install_parameters
             
             print("Uruchamianie instalatora...")
             result = subprocess.run(install, capture_output=True, text=True)

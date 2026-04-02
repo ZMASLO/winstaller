@@ -1,5 +1,6 @@
 import os
 import sys
+import queue
 import ctypes
 import threading
 import customtkinter as ctk
@@ -44,11 +45,14 @@ class ModernApp(ctk.CTk):
         self.stop_event = threading.Event()
         
         # Przekierowanie stdout i stderr do terminala
-        self.stdout_redirector = self.TerminalRedirector(self.terminal_output)
-        self.stderr_redirector = self.TerminalRedirector(self.terminal_output)
+        self.stdout_redirector = self.TerminalRedirector()
+        self.stderr_redirector = self.TerminalRedirector()
         sys.stdout = self.stdout_redirector
         sys.stderr = self.stderr_redirector
-        
+
+        # Uruchomienie pętli odczytu kolejki terminala
+        self.after(50, self._poll_terminal)
+
         # Początkowy komunikat w terminalu
         print(get_version_info()+" - gotowy do pracy.\n")
 
@@ -157,17 +161,30 @@ class ModernApp(ctk.CTk):
         self.terminal_frame.grid_columnconfigure(0, weight=1)
 
     class TerminalRedirector:
-        def __init__(self, text_widget):
-            self.text_widget = text_widget
-            
-        def write(self, str):
-            self.text_widget.configure(state="normal")
-            self.text_widget.insert("end", str)
-            self.text_widget.see("end")
-            self.text_widget.configure(state="disabled")
-            
+        def __init__(self):
+            self.queue = queue.Queue()
+
+        def write(self, text):
+            self.queue.put(text)
+
         def flush(self):
             pass
+
+    def _poll_terminal(self):
+        widget = self.terminal_output
+        while not self.stdout_redirector.queue.empty():
+            text = self.stdout_redirector.queue.get_nowait()
+            widget.configure(state="normal")
+            widget.insert("end", text)
+            widget.see("end")
+            widget.configure(state="disabled")
+        while not self.stderr_redirector.queue.empty():
+            text = self.stderr_redirector.queue.get_nowait()
+            widget.configure(state="normal")
+            widget.insert("end", text)
+            widget.see("end")
+            widget.configure(state="disabled")
+        self.after(50, self._poll_terminal)
 
     def create_category_label(self, name):
         label = ctk.CTkLabel(
@@ -203,6 +220,7 @@ class ModernApp(ctk.CTk):
 
     def start_installation(self):
         self.progress_bar.set(0)  # resetowanie paska postępu
+        self.stop_event.clear()
         self.stop_button.configure(state="normal")
 
         if self.count_checkboxes_checked():
@@ -214,7 +232,6 @@ class ModernApp(ctk.CTk):
             for checkbox in self.checkboxes:
                 # stop install event
                 if self.stop_event.is_set():
-                    self.stop_event.clear()
                     break
                 #jeśli checkbox jest zaznaczony
                 if checkbox["var"].get():

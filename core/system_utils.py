@@ -8,28 +8,29 @@ import subprocess
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
+    except Exception:
         return False
 
 def check_winget_installed():
     try:
         subprocess.check_output(["winget", "-v"])
         return True
-    except:
+    except Exception:
         return False
 
+_THEME_REG_PATH = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+
 def windows_light_mode():
-    key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
     value_name = "AppsUseLightTheme"
     try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _THEME_REG_PATH, 0, winreg.KEY_SET_VALUE)
         winreg.DeleteValue(key, value_name)
         winreg.CloseKey(key)
     except Exception as e:
-        raise Exception(f"Wystąpił błąd podczas usuwania wartości {value_name} z klucza {key_path}: {e}")
+        raise Exception(f"Wystąpił błąd podczas usuwania wartości {value_name} z klucza {_THEME_REG_PATH}: {e}")
 
 def windows_dark_mode():
-    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+    key = winreg.CreateKey(winreg.HKEY_CURRENT_USER, _THEME_REG_PATH)
     winreg.SetValueEx(key, "AppsUseLightTheme", 0, winreg.REG_DWORD, 0)
     winreg.CloseKey(key)
 

@@ -1,14 +1,10 @@
 import sys
 import ctypes
 import subprocess
-import ctypes
 from gui.app import ModernApp
 from gui.dialogs import show_message
 from core.system_utils import is_admin, check_winget_installed
 from core.config import CATEGORIES
-
-# Słownik funkcji jest generowany automatycznie z kategorii
-checkbox_function = {name: func for category in CATEGORIES.values() for name, func in category.items()}
 
 if __name__ == "__main__":
     if not is_admin():

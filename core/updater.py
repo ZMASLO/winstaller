@@ -13,7 +13,7 @@ GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 def get_latest_release_info():
     """Pobiera informacje o najnowszej wersji z GitHub."""
     try:
-        response = requests.get(GITHUB_API_URL)
+        response = requests.get(GITHUB_API_URL, timeout=10)
         if response.status_code == 200:
             return response.json()
         return None
@@ -23,7 +23,7 @@ def get_latest_release_info():
 def download_file(url, filename, progress_dialog=None):
     """Pobiera plik z podanego URL z obsługą postępu."""
     try:
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, timeout=30)
         if response.status_code == 200:
             # Pobierz całkowity rozmiar pliku
             total_size = int(response.headers.get('content-length', 0))

@@ -41,3 +41,14 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.1.3] - 2026-04-02
 - updater now can determine architecture and check tag for github actions
+
+## [1.1.4] - 2026-04-02
+- Fix thread-unsafe TerminalRedirector by using queue and after() polling instead of direct widget writes from worker thread
+- Fix race condition in stop_event handling by moving clear() to main thread before thread start
+- Fix bare except: in is_admin() and check_winget_installed() to no longer swallow KeyboardInterrupt/SystemExit
+- Add timeout to GitHub API request (10s) and update file download (30s) to prevent GUI hangs
+- Remove duplicate ctypes import and unused checkbox_function dict from main.py
+- Extract _decode_output() helper to deduplicate encoding fallback logic in winget_install/uninstall
+- Extract _center_on_parent() helper to deduplicate dialog centering logic across four dialog classes
+- Extract _THEME_REG_PATH constant shared by windows_light_mode() and windows_dark_mode()
+- Replace backslash string concatenation with os.path.join() in installer download functions
