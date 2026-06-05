@@ -5,6 +5,7 @@ import sys
 import re
 from datetime import datetime
 
+
 def get_current_version():
     """Pobiera aktualną wersję z git tag (bez prefiksu v)."""
     try:
@@ -21,13 +22,6 @@ def get_current_version():
                 return match.group(1)
         return "0.0.0"
 
-def check_uncommitted_changes():
-    """Sprawdza czy są niezacommitowane zmiany."""
-    try:
-        status = subprocess.check_output(['git', 'status', '--porcelain']).decode().strip()
-        return bool(status)
-    except subprocess.CalledProcessError:
-        return False
 
 def bump_version(current_version, bump_type):
     """Zwiększa numer wersji zgodnie z typem (major, minor, patch)."""
@@ -43,12 +37,14 @@ def bump_version(current_version, bump_type):
     else:
         raise ValueError("Nieprawidłowy typ aktualizacji wersji")
 
+
 def create_changelog_entry(version, changes):
     """Tworzy wpis w CHANGELOG.md."""
     with open("CHANGELOG.md", "a", encoding="utf-8") as f:
         f.write(f"\n## [{version}] - {datetime.now().strftime('%Y-%m-%d')}\n")
         for change in changes:
             f.write(f"- {change}\n")
+
 
 def update_version_file(new_version):
     """Aktualizuje wersję w pliku core/version.py."""
@@ -64,9 +60,11 @@ def update_version_file(new_version):
     with open("core/version.py", "w", encoding="utf-8") as f:
         f.write(updated_content)
 
+
 def run(cmd, check=True):
     result = subprocess.run(cmd, check=check)
     return result.returncode == 0
+
 
 def main():
     if len(sys.argv) < 2:
@@ -78,34 +76,36 @@ def main():
         print("Typ aktualizacji musi być jednym z: major, minor, patch")
         sys.exit(1)
 
-    if check_uncommitted_changes():
-        print("UWAGA: Wykryto niezacommitowane zmiany!")
-        response = input("Czy chcesz kontynuować mimo to? (t/N): ")
-        if response.lower() != 't':
-            print("Przerwano. Najpierw zacommituj zmiany.")
-            sys.exit(1)
-
     current_version = get_current_version()
     new_version = bump_version(current_version, bump_type)
     tag = f"v{new_version}"
 
     changes = [sys.argv[2]] if len(sys.argv) > 2 else []
 
-    # 1. Aktualizuj pliki
+    # 1. Aktualizuj pliki wersji i changelogu
     update_version_file(new_version)
     create_changelog_entry(new_version, changes)
     print(f"Zaktualizowano core/version.py i CHANGELOG.md do {new_version}")
 
-    # 2. Commituj zmiany
-    run(['git', 'add', 'core/version.py', 'CHANGELOG.md'])
-    run(['git', 'commit', '-m', f'bump version to {new_version}'])
+    # 2. Zacommituj WSZYSTKIE zmiany (włącznie z niezacommitowanymi + bump)
+    run(['git', 'add', '.'])
+    try:
+        run(['git', 'commit', '-m', f'release {new_version}'])
+    except subprocess.CalledProcessError:
+        # Brak zmian do commitemania
+        print("Brak zmian do commitowania, pominięto.")
 
-    # 3. Utwórz tag z prefiksem v
+    # 3. Usuń stary tag jeśli istnieje i utwórz nowy na końcu historii
+    try:
+        run(['git', 'tag', '-d', tag], check=False)
+    except Exception:
+        pass
     run(['git', 'tag', '-a', tag, '-m', f'Wersja {new_version}'])
     print(f"Utworzono tag {tag}")
 
     print(f"\nAby uruchomić GitHub Actions, wykonaj:")
-    print(f"  git push origin main && git push origin {tag}")
+    print(f"  git push origin main && git push origin --tags")
+
 
 if __name__ == "__main__":
     main()

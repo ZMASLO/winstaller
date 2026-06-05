@@ -206,11 +206,13 @@ def install_displaydriveruninstaller():
 def install_onedrive():
     winget_install("Microsoft.OneDrive")
 
-def copy_benchmark_tools():
-    import platform
+def copy_benchmark_tools_x64():
     from core.system_utils import copy_directory_to_desktop
-    folder = "BenchmarkToolsARM64" if platform.machine().lower() == "arm64" else "BenchmarkTools"
-    copy_directory_to_desktop(folder)
+    copy_directory_to_desktop("BenchmarkTools")
+
+def copy_benchmark_tools_arm():
+    from core.system_utils import copy_directory_to_desktop
+    copy_directory_to_desktop("BenchmarkToolsARM")
 
 def copy_winstaller():
     from core.system_utils import copy_file_to_desktop

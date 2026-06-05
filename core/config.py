@@ -3,9 +3,6 @@ from core.installers import *
 from core.system_utils import *
 from core.version import get_version_info
 
-_bench_folder = "BenchmarkToolsARM64" if platform.machine().lower() == "arm64" else "BenchmarkTools"
-_bench_label = f"Kopiuj {_bench_folder} na pulpit"
-
 # Konfiguracja aplikacji
 APP_CONFIG = {
     "title": get_version_info(),
@@ -62,11 +59,14 @@ CATEGORIES = {
         "Odinstaluj OneDrive": uninstall_onedrive
     },
     "Dodatkowe": {
-        _bench_label: copy_benchmark_tools,
+        "Kopiuj BenchmarkTools na pulpit": copy_benchmark_tools_x64,
         "Kopiuj winstaller na pulpit": copy_winstaller,
         "Instaluj lokalne oprogramowanie": install_local_software
     }
 }
+
+if platform.machine().lower() == "arm64":
+    CATEGORIES["Dodatkowe"]["Kopiuj BenchmarkToolsARM na pulpit"] = copy_benchmark_tools_arm
 
 # Słownik funkcji jest generowany automatycznie z kategorii
 CHECKBOX_FUNCTIONS = {name: func for category in CATEGORIES.values() for name, func in category.items()}
@@ -84,7 +84,7 @@ BENCHMARK_PROGRAMS = [
     'Rivatuner',
     'CapFrameX',
     'Windows Terminal',
-    _bench_label,
+    'Kopiuj BenchmarkTools na pulpit',
     'Usuń bloatware z Windows',
     'CPU-Z',
     'GPU-Z',
