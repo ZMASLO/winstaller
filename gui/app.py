@@ -265,8 +265,11 @@ class ModernApp(ctk.CTk):
         show_message(self, "Zatrzymuję zadania...")
 
     def start_benchmark(self):
+        import platform
         for checkbox_name in BENCHMARK_PROGRAMS:
             self.check_checkbox(checkbox_name)
+        if platform.machine().lower() == "arm64":
+            self.check_checkbox("Kopiuj BenchmarkToolsARM na pulpit")
 
     def log_toggle(self):
         if not self.terminal_visible:
