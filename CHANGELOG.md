@@ -39,6 +39,9 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - change install method of capframex
 - fix version display in app terminal
 
+## [1.1.5] - 2026-06-05
+- Benchmark starter on ARM64 architecture now also selects "Kopiuj BenchmarkToolsARM na pulpit"
+
 ## [1.1.3] - 2026-04-02
 - updater now can determine architecture and check tag for github actions
 
