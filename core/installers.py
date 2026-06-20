@@ -9,6 +9,7 @@ import sys
 import threading
 
 _ansi_re = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+_stop_flag = threading.Event()
 
 def _decode_output(raw):
     for encoding in ['utf-8', 'cp1250', 'cp852', 'iso-8859-2']:
@@ -23,7 +24,10 @@ def _read_stream(pipe, stream_obj):
     escape_mode = False
     
     while True:
-        chunk = pipe.read(1)
+        try:
+            chunk = pipe.read(1)
+        except OSError:
+            break
         if not chunk:
             break
         
@@ -63,12 +67,33 @@ def _stream_winget(proc):
     t_stderr = threading.Thread(target=_read_stream, args=(proc.stderr, sys.stderr))
     t_stdout.start()
     t_stderr.start()
-    proc.wait()
-    t_stdout.join()
-    t_stderr.join()
-    return proc.returncode
+
+    killed = False
+    while proc.poll() is None:
+        if _stop_flag.is_set():
+            print("\n⛔ Przerwano przez użytkownika...")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            killed = True
+            break
+        time.sleep(0.05)
+
+    t_stdout.join(timeout=3)
+    t_stderr.join(timeout=3)
+    return -1 if killed else proc.returncode
+
+def kill_current_winget():
+    _stop_flag.set()
 
 def winget_install(name):
+    _stop_flag.clear()
     print(f"Instalowanie {name}...")
     try:
         proc = subprocess.Popen(
@@ -85,6 +110,7 @@ def winget_install(name):
     print(f"\nZakończono instalację {name}\n")
 
 def winget_uninstall(name):
+    _stop_flag.clear()
     print(f"Odinstalowywanie {name}...")
     try:
         proc = subprocess.Popen(

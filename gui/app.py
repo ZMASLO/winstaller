@@ -231,9 +231,11 @@ class ModernApp(ctk.CTk):
         def execute_install():
             #zablokowanie checboxów na czas instalacji
             self.checkbox_all_set_state("disabled")
+            stopped = False
             for checkbox in self.checkboxes:
                 # stop install event
                 if self.stop_event.is_set():
+                    stopped = True
                     break
                 #jeśli checkbox jest zaznaczony
                 if checkbox["var"].get():
@@ -256,15 +258,20 @@ class ModernApp(ctk.CTk):
             self.current_task_label.update()
             self.stop_button.configure(state="disabled")
             self.checkbox_all_set_state("normal")
-            show_message(self, "Zakończono zadania!")
+            if stopped:
+                print("\n⛔ Zadania zatrzymane przez użytkownika.\n")
+            else:
+                show_message(self, "Zakończono zadania!")
         
         t = threading.Thread(target=execute_install)
         t.start()
 
     def stop_installation(self):
         self.stop_event.set()
+        from core.installers import kill_current_winget
+        kill_current_winget()
         self.stop_button.configure(state="disabled")
-        show_message(self, "Zatrzymuję zadania...")
+        print("\n⛔ Zatrzymywanie zadań...")
 
     def start_benchmark(self):
         import platform

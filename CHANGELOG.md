@@ -65,3 +65,6 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.1.7] - 2026-06-20
 - Real-time streaming winget output z animacją progress bara w terminalu
+
+## [1.1.8] - 2026-06-20
+- Przycisk Stop działa w trakcie instalacji winget - zabija proces zamiast czekać na koniec
