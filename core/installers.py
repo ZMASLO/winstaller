@@ -1,9 +1,14 @@
 import os
+import re
+import time
 import subprocess
 import requests
 import zipfile
 import shutil
 import sys
+import threading
+
+_ansi_re = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 def _decode_output(raw):
     for encoding in ['utf-8', 'cp1250', 'cp852', 'iso-8859-2']:
@@ -13,46 +18,87 @@ def _decode_output(raw):
             continue
     return raw.decode('utf-8', errors='replace') if raw else ""
 
+def _read_stream(pipe, stream_obj):
+    line_buffer = ""
+    escape_mode = False
+    
+    while True:
+        chunk = pipe.read(1)
+        if not chunk:
+            break
+        
+        byte_val = chunk[0]
+        
+        if byte_val == 0x1b:
+            escape_mode = True
+            continue
+        
+        if escape_mode:
+            if 0x40 <= byte_val <= 0x7E or byte_val == 0x3F:
+                escape_mode = False
+            continue
+        
+        char = chr(byte_val) if byte_val < 128 else _decode_output(chunk)
+        
+        if char == '\n':
+            clean = _ansi_re.sub('', line_buffer).strip()
+            if clean:
+                stream_obj.write(clean + "\n")
+            line_buffer = ""
+        elif char == '\r':
+            clean = _ansi_re.sub('', line_buffer).strip()
+            if clean:
+                stream_obj.replace_last_line(clean)
+                time.sleep(0.02)
+            line_buffer = ""
+        else:
+            line_buffer += char
+    
+    clean = _ansi_re.sub('', line_buffer).strip()
+    if clean:
+        stream_obj.write(clean + "\n")
+
+def _stream_winget(proc):
+    t_stdout = threading.Thread(target=_read_stream, args=(proc.stdout, sys.stdout))
+    t_stderr = threading.Thread(target=_read_stream, args=(proc.stderr, sys.stderr))
+    t_stdout.start()
+    t_stderr.start()
+    proc.wait()
+    t_stdout.join()
+    t_stderr.join()
+    return proc.returncode
+
 def winget_install(name):
     print(f"Instalowanie {name}...")
     try:
-        # Próba z domyślnym kodowaniem systemowym
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["winget", "install", "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements", name],
-            capture_output=True,
-            encoding=None  # Używamy None zamiast text=True, aby otrzymać bajty
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        
-        stdout = _decode_output(result.stdout)
-        stderr = _decode_output(result.stderr)
-        print(stdout)
-        if stderr:
-            print("Błędy:", stderr)
-
+        returncode = _stream_winget(proc)
+        if returncode != 0:
+            print(f"Kod powrotu: {returncode}")
     except Exception as e:
         print(f"Wystąpił błąd podczas instalacji {name}: {str(e)}")
 
-    print(f"Zakończono instalację {name}\n")
+    print(f"\nZakończono instalację {name}\n")
 
 def winget_uninstall(name):
     print(f"Odinstalowywanie {name}...")
     try:
-        # Próba z domyślnym kodowaniem systemowym
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["winget", "uninstall", "--silent", name],
-            capture_output=True,
-            encoding=None
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        stdout = _decode_output(result.stdout)
-        stderr = _decode_output(result.stderr)
-        print(stdout)
-        if stderr:
-            print("Błędy:", stderr)
-
+        returncode = _stream_winget(proc)
+        if returncode != 0:
+            print(f"Kod powrotu: {returncode}")
     except Exception as e:
         print(f"Wystąpił błąd podczas odinstalowywania {name}: {str(e)}")
         
-    print(f"Zakończono odinstalowanie {name}\n")
+    print(f"\nZakończono odinstalowanie {name}\n")
 
 def download_install(url, install_parameters):
     print(f"Pobieranie z {url}...")

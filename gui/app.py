@@ -165,25 +165,27 @@ class ModernApp(ctk.CTk):
             self.queue = queue.Queue()
 
         def write(self, text):
-            self.queue.put(text)
+            self.queue.put(("append", text))
+
+        def replace_last_line(self, text):
+            self.queue.put(("replace_last", text))
 
         def flush(self):
             pass
 
     def _poll_terminal(self):
         widget = self.terminal_output
-        while not self.stdout_redirector.queue.empty():
-            text = self.stdout_redirector.queue.get_nowait()
-            widget.configure(state="normal")
-            widget.insert("end", text)
-            widget.see("end")
-            widget.configure(state="disabled")
-        while not self.stderr_redirector.queue.empty():
-            text = self.stderr_redirector.queue.get_nowait()
-            widget.configure(state="normal")
-            widget.insert("end", text)
-            widget.see("end")
-            widget.configure(state="disabled")
+        for redirector in [self.stdout_redirector, self.stderr_redirector]:
+            while not redirector.queue.empty():
+                msg_type, text = redirector.queue.get_nowait()
+                widget.configure(state="normal")
+                if msg_type == "append":
+                    widget.insert("end", text)
+                elif msg_type == "replace_last":
+                    widget.delete("end-1l", "end")
+                    widget.insert("end", "\n" + text)
+                widget.see("end")
+                widget.configure(state="disabled")
         self.after(50, self._poll_terminal)
 
     def create_category_label(self, name):
