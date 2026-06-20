@@ -125,7 +125,7 @@ class ModernUpdateDialog(ctk.CTkToplevel):
         # Ikona aktualizacji (emoji)
         self.update_icon = ctk.CTkLabel(
             self,
-            text="🔄",
+            text="A",
             font=("Segoe UI", 32)
         )
         self.update_icon.grid(row=0, column=0, columnspan=2, pady=(20, 0))

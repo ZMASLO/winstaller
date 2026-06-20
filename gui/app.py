@@ -225,10 +225,13 @@ class ModernApp(ctk.CTk):
         self.stop_event.clear()
         self.stop_button.configure(state="normal")
 
-        if self.count_checkboxes_checked():
-            progress_bar_single_task_percentage = 100/self.count_checkboxes_checked()
+        tasks_count = self.count_checkboxes_checked()
+        progress_bar_single_task_percentage = 100 / tasks_count if tasks_count else 0
 
         def execute_install():
+            import time
+            install_start = time.time()
+            results = []
             #zablokowanie checboxów na czas instalacji
             self.checkbox_all_set_state("disabled")
             stopped = False
@@ -239,18 +242,25 @@ class ModernApp(ctk.CTk):
                     break
                 #jeśli checkbox jest zaznaczony
                 if checkbox["var"].get():
-                    self.current_task_label.configure(text=checkbox['checkbox'].cget("text")) #aktualizacja labelki
+                    name = checkbox['checkbox'].cget("text")
+                    self.current_task_label.configure(text=name) #aktualizacja labelki
                     self.current_task_label.update()
                     try:
                         #wywołanie funkcji instalacyjnej przypisanej w słowniku checkbox_function
-                        CHECKBOX_FUNCTIONS[checkbox['checkbox'].cget("text")]()
+                        CHECKBOX_FUNCTIONS[name]()
+                        results.append((name, "sukces"))
                     except Exception as e:
-                        show_message(self, "Problem podczas wykonania "+checkbox['checkbox'].cget("text")+"\n"+str(e))
-                        
+                        results.append((name, f"błąd: {e}"))
+                        show_message(self, "Problem podczas wykonania "+name+"\n"+str(e))
+
                     #aktualizacja paska postępu
                     self.progress_bar.set(self.progress_bar.get() + progress_bar_single_task_percentage/100)
                     self.progress_bar.update()
                     checkbox['checkbox'].deselect()
+
+            elapsed = time.time() - install_start
+            success_count = sum(1 for _, s in results if s == "sukces")
+            error_count = len(results) - success_count
 
             self.progress_bar.set(0)
             self.progress_bar.update()
@@ -258,10 +268,23 @@ class ModernApp(ctk.CTk):
             self.current_task_label.update()
             self.stop_button.configure(state="disabled")
             self.checkbox_all_set_state("normal")
-            if stopped:
-                print("\n⛔ Zadania zatrzymane przez użytkownika.\n")
-            else:
-                show_message(self, "Zakończono zadania!")
+
+            if results:
+                print(f"\n{'-'*40}")
+                print(f"  Podsumowanie instalacji:")
+                print(f"  Zadań: {tasks_count}")
+                print(f"  Powiodły się: {success_count}")
+                if error_count:
+                    print(f"  Błędy: {error_count}")
+                    for n, st in results:
+                        if st != "sukces":
+                            print(f"    X {n} - {st}")
+                if stopped:
+                    print(f"  Przerwano przez uzytkownika")
+                print(f"  Czas: {elapsed:.1f}s")
+                print(f"{'-'*40}\n")
+            elif tasks_count == 0:
+                show_message(self, "Brak zaznaczonych zadań!")
         
         t = threading.Thread(target=execute_install)
         t.start()
@@ -271,7 +294,7 @@ class ModernApp(ctk.CTk):
         from core.installers import kill_current_winget
         kill_current_winget()
         self.stop_button.configure(state="disabled")
-        print("\n⛔ Zatrzymywanie zadań...")
+        print("\n-- Zatrzimowanie zadan...")
 
     def start_benchmark(self):
         import platform

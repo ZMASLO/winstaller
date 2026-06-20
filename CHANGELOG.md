@@ -67,4 +67,9 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Real-time streaming winget output z animacją progress bara w terminalu
 
 ## [1.1.8] - 2026-06-20
-- Przycisk Stop działa w trakcie instalacji winget - zabija proces zamiast czekać na koniec
+- Refactored _read_stream: changed pipe.read(1) to pipe.read(512) for proper UTF-8/CP1250 multibyte Polish character rendering
+- Added ANSI escape stripping on raw bytes level before decoding (new helper _strip_ansi_bytes)
+- Stop button now kills running winget process mid-installation instead of waiting for it to finish
+- Replaced show_message() in stop_installation() with print() to fix Tkinter modal dialog deadlock from worker thread
+- Added installation summary at the end: task count, success/fail counts, elapsed time, error details
+- Removed all emojis from terminal output and dialogs for consistency

@@ -19,48 +19,63 @@ def _decode_output(raw):
             continue
     return raw.decode('utf-8', errors='replace') if raw else ""
 
+def _strip_ansi_bytes(data):
+    result = bytearray()
+    i = 0
+    while i < len(data):
+        if data[i] == 0x1b and (i + 1) < len(data):
+            if data[i+1] == 0x5b:
+                j = i + 2
+                while j < len(data) and not(0x40 <= data[j] <= 0x7E):
+                    j += 1
+                i = j + 1 if j < len(data) else j
+                continue
+            else:
+                i += 2
+                continue
+        result.append(data[i])
+        i += 1
+    return bytes(result)
+
 def _read_stream(pipe, stream_obj):
-    line_buffer = ""
-    escape_mode = False
-    
+    raw_buffer = b""
+
     while True:
         try:
-            chunk = pipe.read(1)
+            chunk = pipe.read(512)
         except OSError:
             break
         if not chunk:
             break
-        
-        byte_val = chunk[0]
-        
-        if byte_val == 0x1b:
-            escape_mode = True
-            continue
-        
-        if escape_mode:
-            if 0x40 <= byte_val <= 0x7E or byte_val == 0x3F:
-                escape_mode = False
-            continue
-        
-        char = chr(byte_val) if byte_val < 128 else _decode_output(chunk)
-        
-        if char == '\n':
-            clean = _ansi_re.sub('', line_buffer).strip()
-            if clean:
-                stream_obj.write(clean + "\n")
-            line_buffer = ""
-        elif char == '\r':
-            clean = _ansi_re.sub('', line_buffer).strip()
-            if clean:
-                stream_obj.replace_last_line(clean)
-                time.sleep(0.02)
-            line_buffer = ""
-        else:
-            line_buffer += char
-    
-    clean = _ansi_re.sub('', line_buffer).strip()
-    if clean:
-        stream_obj.write(clean + "\n")
+        raw_buffer += chunk
+
+        raw_buffer = _strip_ansi_bytes(raw_buffer)
+
+        parts = raw_buffer.split(b'\n')
+        raw_buffer = parts[-1]
+
+        for part in parts[:-1]:
+            text = _decode_output(part)
+            cr_parts = text.split('\r')
+            if len(cr_parts) == 1:
+                stripped = cr_parts[0].strip()
+                if stripped:
+                    stream_obj.write(stripped + "\n")
+            else:
+                for i, segment in enumerate(cr_parts):
+                    stripped = segment.strip()
+                    if not stripped:
+                        continue
+                    if i < len(cr_parts) - 1:
+                        stream_obj.replace_last_line(stripped)
+                    else:
+                        stream_obj.write(stripped + "\n")
+
+        time.sleep(0.01)
+
+    remaining = _decode_output(raw_buffer).strip()
+    if remaining:
+        stream_obj.write(remaining + "\n")
 
 def _stream_winget(proc):
     t_stdout = threading.Thread(target=_read_stream, args=(proc.stdout, sys.stdout))
@@ -71,7 +86,7 @@ def _stream_winget(proc):
     killed = False
     while proc.poll() is None:
         if _stop_flag.is_set():
-            print("\n⛔ Przerwano przez użytkownika...")
+            print("\n-- Przerwanie procesu przez uzytkownika...")
             try:
                 proc.terminate()
             except Exception:
