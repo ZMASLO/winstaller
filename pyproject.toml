@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "winstaller"
+dynamic = ["version"]
+description = "Instalator programów (winget) i konfigurator platformy testowej dla Windows."
+readme = "README.md"
+requires-python = ">=3.12"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+    "Environment :: Win32 (MS Windows)",
+]
+dependencies = [
+    "PySide6-Essentials>=6.7",
+    "requests>=2.31",
+]
+
+[project.scripts]
+winstaller = "winstaller.__main__:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-qt>=4.4",
+    "pytest-benchmark>=4",
+    "ruff>=0.6",
+    "pyinstaller>=6.9",
+]
+
+[tool.setuptools.packages.find]
+include = ["winstaller*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "winstaller.core.version.VERSION" }
+
+[tool.setuptools.package-data]
+"winstaller.core" = ["catalog.toml"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["winstaller"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "perf: performance benchmarks (pytest-benchmark)",
+    "ui: Qt UI tests (pytest-qt, offscreen)",
+]

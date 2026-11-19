@@ -10,8 +10,14 @@ build/
 
 # Środowisko wirtualne
 venv/
+.venv/
 env/
 .env/
+
+# Narzędzia deweloperskie
+.pytest_cache/
+.ruff_cache/
+.benchmarks/
 
 # IDE
 .vscode/

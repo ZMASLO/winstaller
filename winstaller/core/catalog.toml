@@ -1,0 +1,440 @@
+# Winstaller catalog. Format and "how to add a program": docs/ARCHITECTURE.md.
+#
+# Categories and items are shown in file order. Item ids are stable slugs:
+# profiles, UI state and tests refer to them, so do not rename them lightly.
+
+# ---------------------------------------------------------------- categories
+
+[[categories]]
+id = "basic"
+name = "Podstawowe programy"
+description = "Przeglądarka, komunikatory i podstawowe narzędzia."
+
+[[categories]]
+id = "launchers"
+name = "Launchery"
+description = "Sklepy i launchery gier."
+
+[[categories]]
+id = "diagnostics"
+name = "Narzędzia diagnostyczne"
+description = "Monitorowanie i diagnostyka sprzętu."
+
+[[categories]]
+id = "testing"
+name = "Narzędzia testowe"
+description = "Oprogramowanie do benchmarków i pomiaru klatek."
+
+[[categories]]
+id = "pro"
+name = "Aplikacje profesjonalne"
+description = "Montaż, grafika 3D i lokalne modele AI."
+
+[[categories]]
+id = "system"
+name = "Konfiguracja systemu"
+description = "Ustawienia i porządki w systemie Windows."
+
+[[categories]]
+id = "extras"
+name = "Dodatkowe"
+description = "Pliki lokalne kopiowane z katalogu programu."
+
+[[categories]]
+id = "tools"
+name = "Narzędzia"
+description = "Akcje wykonywane natychmiast, poza kolejką instalacji."
+kind = "tools"
+
+# --------------------------------------------------------------------- basic
+
+[[items]]
+id = "google-chrome"
+name = "Google Chrome"
+category = "basic"
+kind = "winget"
+winget_id = "Google.Chrome"
+description = "Przeglądarka internetowa Google."
+
+[[items]]
+id = "telegram"
+name = "Telegram"
+category = "basic"
+kind = "winget"
+winget_id = "9NZTWSQNTD0S"
+description = "Komunikator Telegram (Microsoft Store)."
+
+[[items]]
+id = "messenger"
+name = "Messenger"
+category = "basic"
+kind = "winget"
+winget_id = "9WZDNCRF0083"
+description = "Komunikator Messenger (Microsoft Store)."
+unavailable = "Pakietu nie ma już w winget/Microsoft Store (aplikacja desktopowa wycofana)."
+
+[[items]]
+id = "discord"
+name = "Discord"
+category = "basic"
+kind = "winget"
+winget_id = "Discord.Discord"
+description = "Komunikator głosowy i tekstowy."
+
+[[items]]
+id = "teamspeak3"
+name = "TeamSpeak3"
+category = "basic"
+kind = "winget"
+winget_id = "TeamSpeakSystems.TeamSpeakClient"
+description = "Klient TeamSpeak 3."
+
+[[items]]
+id = "7zip"
+name = "7-Zip"
+category = "basic"
+kind = "winget"
+winget_id = "7zip.7zip"
+description = "Archiwizator plików."
+
+[[items]]
+id = "windows-terminal"
+name = "Windows Terminal"
+category = "basic"
+kind = "winget"
+winget_id = "9N0DX20HK701"
+description = "Nowoczesny terminal (Microsoft Store)."
+
+# ----------------------------------------------------------------- launchers
+
+[[items]]
+id = "steam"
+name = "Steam"
+category = "launchers"
+kind = "winget"
+winget_id = "Valve.Steam"
+post_launch = '%ProgramFiles(x86)%\Steam\Steam.exe'
+description = "Launcher Steam; uruchamiany po instalacji."
+
+[[items]]
+id = "epic-games"
+name = "Epic Games Store"
+category = "launchers"
+kind = "winget"
+winget_id = "EpicGames.EpicGamesLauncher"
+post_launch = '%ProgramFiles(x86)%\Epic Games\Launcher\Portal\Binaries\Win64\EpicGamesLauncher.exe'
+description = "Launcher Epic Games; uruchamiany po instalacji."
+
+[[items]]
+id = "ubisoft-connect"
+name = "Ubisoft Connect"
+category = "launchers"
+kind = "winget"
+winget_id = "Ubisoft.Connect"
+description = "Launcher gier Ubisoft."
+
+[[items]]
+id = "ea-desktop"
+name = "EA Desktop"
+category = "launchers"
+kind = "winget"
+winget_id = "ElectronicArts.EADesktop"
+description = "Aplikacja EA (dawniej Origin)."
+
+[[items]]
+id = "battle-net"
+name = "Battle.net"
+category = "launchers"
+kind = "winget"
+winget_id = "Blizzard.BattleNet"
+description = "Launcher gier Blizzard."
+
+# --------------------------------------------------------------- diagnostics
+
+[[items]]
+id = "hwmonitor"
+name = "HW Monitor"
+category = "diagnostics"
+kind = "winget"
+winget_id = "CPUID.HWMonitor"
+description = "Odczyt temperatur, napięć i obrotów wentylatorów."
+
+[[items]]
+id = "hwinfo"
+name = "HW Info"
+category = "diagnostics"
+kind = "winget"
+winget_id = "REALiX.HWiNFO"
+description = "Szczegółowe informacje o sprzęcie i czujnikach."
+
+[[items]]
+id = "cpu-z"
+name = "CPU-Z"
+category = "diagnostics"
+kind = "winget"
+winget_id = "CPUID.CPU-Z"
+description = "Informacje o procesorze, płycie głównej i pamięci."
+
+[[items]]
+id = "gpu-z"
+name = "GPU-Z"
+category = "diagnostics"
+kind = "winget"
+winget_id = "TechPowerUp.GPU-Z"
+description = "Informacje o karcie graficznej."
+
+[[items]]
+id = "displaycal"
+name = "DisplayCal"
+category = "diagnostics"
+kind = "winget"
+winget_id = "FlorianHoech.DisplayCAL"
+description = "Kalibracja i profilowanie monitora."
+
+[[items]]
+id = "ddu"
+name = "DisplayDriverUninstaller"
+category = "diagnostics"
+kind = "winget"
+winget_id = "Wagnardsoft.DisplayDriverUninstaller"
+description = "Całkowite usuwanie sterowników graficznych."
+
+[[items]]
+id = "nvcleanstall"
+name = "NVCleanstall"
+category = "diagnostics"
+kind = "winget"
+winget_id = "TechPowerUp.NVCleanstall"
+description = "Instalacja sterowników NVIDIA bez zbędnych dodatków."
+
+# ------------------------------------------------------------------- testing
+
+[[items]]
+id = "directx9"
+name = "DirectX 9"
+category = "testing"
+kind = "winget"
+winget_id = "Microsoft.DirectX"
+description = "Biblioteki DirectX End-User Runtime (wymagane przez starsze gry)."
+
+[[items]]
+id = "msi-afterburner"
+name = "MSI Afterburner"
+category = "testing"
+kind = "winget"
+winget_id = "Guru3D.Afterburner"
+description = "Podkręcanie i monitorowanie karty graficznej."
+
+[[items]]
+id = "rivatuner"
+name = "Rivatuner"
+category = "testing"
+kind = "winget"
+winget_id = "Guru3D.RTSS"
+description = "RivaTuner Statistics Server - nakładka OSD i limiter klatek."
+
+[[items]]
+id = "capframex"
+name = "CapFrameX"
+category = "testing"
+kind = "winget"
+winget_id = "CXWorld.CapFrameX"
+description = "Rejestracja i analiza czasów klatek."
+
+[[items]]
+id = "ul-procyon"
+name = "UL Procyon"
+category = "testing"
+kind = "local_exe"
+path = 'procyon\procyon-setup.exe'
+args = ["/silent"]
+description = "Pakiet benchmarków UL Procyon z lokalnego instalatora."
+
+# ----------------------------------------------------------------------- pro
+
+[[items]]
+id = "davinci-resolve-studio"
+name = "Davinci Resolve Studio"
+category = "pro"
+kind = "local_exe"
+path = 'DaVinci_Resolve_Studio_*_Windows.exe'
+args = ["/i", "/q", "/noreboot"]
+description = "Wymaga lokalnego instalatora DaVinci_Resolve_Studio_<wersja>_Windows.exe (ze strony Blackmagic Design) obok programu."
+
+[[items]]
+id = "creative-cloud"
+name = "Creative Cloud"
+category = "pro"
+kind = "winget"
+winget_id = "XPDLPKWG9SW2WD"
+description = "Adobe Creative Cloud (Microsoft Store)."
+
+[[items]]
+id = "blender"
+name = "Blender"
+category = "pro"
+kind = "winget"
+winget_id = "BlenderFoundation.Blender"
+description = "Grafika i animacja 3D."
+
+[[items]]
+id = "lm-studio"
+name = "LM Studio"
+category = "pro"
+kind = "winget"
+winget_id = "ElementLabs.LMStudio"
+description = "Uruchamianie lokalnych modeli językowych."
+
+# -------------------------------------------------------------------- system
+
+[[items]]
+id = "remove-bloat"
+name = "Usuń bloatware z Windows"
+category = "system"
+kind = "action"
+action = "remove_bloat"
+description = "Usuwa zbędne i sponsorowane aplikacje Microsoft Store dla bieżącego użytkownika."
+confirm = "Usunąć zbędne aplikacje systemowe (np. Bing, Solitaire, Candy Crush)? Tej operacji nie da się cofnąć jednym kliknięciem."
+
+[[items]]
+id = "dark-theme"
+name = "Ciemny motyw Windows"
+category = "system"
+kind = "action"
+action = "theme_dark"
+description = "Ustawia ciemny motyw dla systemu i aplikacji."
+
+[[items]]
+id = "light-theme"
+name = "Jasny motyw Windows"
+category = "system"
+kind = "action"
+action = "theme_light"
+description = "Ustawia jasny motyw dla systemu i aplikacji."
+
+[[items]]
+id = "onedrive-install"
+name = "Zainstaluj OneDrive"
+category = "system"
+kind = "winget"
+winget_id = "Microsoft.OneDrive"
+description = "Instaluje klienta Microsoft OneDrive."
+
+[[items]]
+id = "onedrive-uninstall"
+name = "Odinstaluj OneDrive"
+category = "system"
+kind = "winget_uninstall"
+winget_id = "Microsoft.OneDrive"
+description = "Odinstalowuje klienta Microsoft OneDrive."
+
+# -------------------------------------------------------------------- extras
+
+[[items]]
+id = "copy-benchmark-tools"
+name = "Kopiuj BenchmarkTools na pulpit"
+category = "extras"
+kind = "action"
+action = "copy_dir_to_desktop"
+args = ["BenchmarkTools"]
+requires_files = ["BenchmarkTools"]
+description = "Kopiuje folder BenchmarkTools z katalogu programu na pulpit."
+
+[[items]]
+id = "copy-winstaller"
+name = "Kopiuj winstaller na pulpit"
+category = "extras"
+kind = "action"
+action = "copy_self_to_desktop"
+description = "Kopiuje plik winstaller.exe na pulpit."
+
+[[items]]
+id = "local-rtss"
+name = "RTSS (lokalny instalator)"
+category = "extras"
+kind = "local_exe"
+path = "RTSSSetup734.exe"
+args = ["/S"]
+description = "Instaluje RivaTuner Statistics Server z pliku RTSSSetup734.exe obok programu."
+
+[[items]]
+id = "local-capframex"
+name = "CapFrameX (lokalny bootstrapper)"
+category = "extras"
+kind = "local_exe"
+path = "CapFrameXBootstrapper.exe"
+args = ["/S"]
+description = "Instaluje CapFrameX z pliku CapFrameXBootstrapper.exe obok programu."
+
+[[items]]
+id = "copy-benchmark-tools-arm"
+name = "Kopiuj BenchmarkToolsARM na pulpit"
+category = "extras"
+kind = "action"
+action = "copy_dir_to_desktop"
+args = ["BenchmarkToolsARM"]
+requires_files = ["BenchmarkToolsARM"]
+arch = ["arm64"]
+description = "Kopiuje folder BenchmarkToolsARM z katalogu programu na pulpit."
+
+# --------------------------------------------------------------------- tools
+
+[[items]]
+id = "reboot-bios"
+name = "Restart do BIOS"
+category = "tools"
+kind = "action"
+action = "reboot_to_bios"
+description = "Uruchamia komputer ponownie prosto do ustawień UEFI/BIOS."
+confirm = "Czy na pewno chcesz uruchomić ponownie komputer i wejść do BIOS-u?"
+
+[[items]]
+id = "reboot-advanced"
+name = "Restart zaawansowany"
+category = "tools"
+kind = "action"
+action = "reboot_advanced"
+description = "Uruchamia komputer ponownie do zaawansowanych opcji uruchamiania."
+confirm = "Czy na pewno chcesz uruchomić ponownie komputer w trybie zaawansowanym?"
+
+[[items]]
+id = "battery-report"
+name = "Raport baterii"
+category = "tools"
+kind = "action"
+action = "battery_report"
+description = "Generuje raport baterii (powercfg) i zapisuje go na pulpicie."
+
+# ------------------------------------------------------------------ profiles
+
+[[profiles]]
+id = "benchmark-starter"
+name = "Benchmark starter"
+description = "Zestaw programów i ustawień dla platformy testowej."
+items = [
+    "hwmonitor",
+    "7zip",
+    "hwinfo",
+    "google-chrome",
+    "steam",
+    "epic-games",
+    "ubisoft-connect",
+    "directx9",
+    "rivatuner",
+    "capframex",
+    "windows-terminal",
+    "copy-benchmark-tools",
+    "remove-bloat",
+    "cpu-z",
+    "gpu-z",
+    "dark-theme",
+    "blender",
+    "copy-winstaller",
+    "onedrive-uninstall",
+    "lm-studio",
+    "ul-procyon",
+    "ddu",
+]
+
+[profiles.arch_items]
+arm64 = ["copy-benchmark-tools-arm"]
