@@ -1,0 +1,50 @@
+Name                                                  Id                                 Version        Match                 Source
+------------------------------------------------------------------------------------------------------------------------------------
+Google Chrome                                         Google.Chrome                      158.0.8127.37  Moniker: chrome       winget
+Dichromate                                            Dichromate.Browser                 111.0.5563.65  Command: chrome       winget
+Browser Tamer                                         aloneguid.bt                       6.3.2          Tag: chrome           winget
+ABDownloadManager                                     amir1376.ABDownloadManager         1.11.4         Tag: chrome           winget
+Browser Bookmarks for PowerToys Command Palette       GOODJINC.CmdPalBrowserBookmarks    0.2.3          Tag: chrome           winget
+TabBouncer                                            jacking75.TabBouncer               1.1.1          Tag: chrome           winget
+DataLimiter                                           MichaelSam94.DataLimiter           0.3.2          Tag: chrome           winget
+ClaudeToZenn                                          NuitsJp.ClaudeToZenn               0.0.19         Tag: chrome           winget
+Electron                                              OpenJS.Electron.33                 33.4.11        Tag: chrome           winget
+Electron                                              OpenJS.Electron.34                 34.5.8         Tag: chrome           winget
+Electron                                              OpenJS.Electron.35                 35.7.5         Tag: chrome           winget
+Electron                                              OpenJS.Electron.36                 36.9.5         Tag: chrome           winget
+Electron                                              OpenJS.Electron.37                 37.10.3        Tag: chrome           winget
+Electron                                              OpenJS.Electron.38                 38.8.6         Tag: chrome           winget
+Electron                                              OpenJS.Electron.39                 39.8.10        Tag: chrome           winget
+Electron                                              OpenJS.Electron.40                 40.10.6        Tag: chrome           winget
+Electron                                              OpenJS.Electron.41                 41.10.7        Tag: chrome           winget
+Electron                                              OpenJS.Electron.42                 42.11.18       Tag: chrome           winget
+Electron                                              OpenJS.Electron.43                 43.8.12        Tag: chrome           winget
+Electron                                              OpenJS.Electron.44                 44.11.5        Tag: chrome           winget
+Hindsight                                             obsidianforensics.HindsightGUI     2026.06        Tag: chrome           winget
+AI Browser Toolkit                                    skssmd.AIBrowserToolkit            0.7.8          Tag: chrome           winget
+BrowserDownloadsView                                  NirSoft.BrowserDownloadsView       1.51           Tag: Chrome           winget
+115浏览器                                             115.115Chrome                      36.0.1                               winget
+360极速浏览器                                         360.360Chrome                      23.0.1253.0                          winget
+360 极速浏览器X                                       360.360Chrome.X                    23.1.1312.64                         winget
+ChromeDriver                                          Chromium.ChromeDriver              158.0.8127.36                        winget
+Google Chrome OS Readiness Tool Bundle                Google.ChromeOSReadinessToolBundle 1.0.4.0                              winget
+Chrome Remote Desktop Host                            Google.ChromeRemoteDesktopHost     157.0.8103.41                        winget
+Google Chrome Beta (EXE)                              Google.Chrome.Beta.EXE             159.0.8154.13                        winget
+Google Chrome Canary                                  Google.Chrome.Canary               160.0.8171.0                         winget
+Google Chrome Dev (EXE)                               Google.Chrome.Dev.EXE              160.0.8157.0                         winget
+Google Chrome (EXE)                                   Google.Chrome.EXE                  158.0.8127.37                        winget
+ICBCChromeExtension                                   ICBC.ICBCChromeExtension           1.2.0.0                              winget
+winchrome                                             macchrome.winchrome                150.0.7871.225                       winget
+ChromeCacheView                                       NirSoft.ChromeCacheView            2.52                                 winget
+Ginger Chrome                                         Saxo_Broko.GingerChrome            93.0.4529.0                          winget
+xpchrome                                              weolar.xpchrome                    115.0.5790.136                       winget
+Google Chrome Beta                                    Google.Chrome.Beta                 159.0.8154.13                        winget
+Google Chrome Dev                                     Google.Chrome.Dev                  160.0.8157.0                         winget
+Vision Teacher for Chromebooks Machine-Wide Installer Netop.VisionTeacher                1.7.6.0                              winget
+IPTVnator                                             4gray.iptvnator                    0.25.0         Tag: chromeos         winget
+Ventoy                                                Ventoy.Ventoy                      1.1.18         Tag: chromeos         winget
+Google Updater                                        Google.GoogleUpdater               159.0.8140.0   Tag: google-chrome    winget
+HirePilot                                             JuanPRG.HirePilot                  2.2.3          Tag: chrome-extension winget
+Inssist                                               SlashedIo.Inssist                  16.1.0         Tag: chrome-extension winget
+OpenAI Translator                                     yetone.OpenAITranslator            0.6.43         Tag: chrome-extension winget
+jellytoast                                            wolfgangwarehaus.jellytoast        0.2.5          Tag: chromecast       winget

@@ -1,18 +1,37 @@
-name: Build and Draft Release
+name: CI, build and draft release
+
+# Pushes to main/2.0 and pull requests: lint + tests + build + smoke + size/start-up budgets.
+# Tags vX.Y.Z: the same, plus a DRAFT release with winstaller-x64.exe, winstaller-arm64.exe and
+# SHA256SUMS.txt. Nothing is ever published for ordinary pushes; a draft has to be published by
+# hand on GitHub (only then does `releases/latest`, used by the updaters, see it).
 
 on:
   push:
-    branches:
-      - main
-    tags:
-      - 'v*.*.*'
+    branches: [main, "2.0"]
+    tags: ["v*.*.*"]
+  pull_request:
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # never cancel a release build half-way
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  PYTHON_VERSION: "3.12"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"
+  # Paths ruff checks: the 1.x code (main.py, core/, gui/) is legacy and not linted.
+  LINT_PATHS: winstaller tests tools packaging bump_version.py
 
 jobs:
-  build:
-    name: Build ${{ matrix.arch }}
+  test:
+    name: Test (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -21,62 +40,176 @@ jobs:
             arch: x64
           - os: windows-11-arm
             arch: arm64
-
-    runs-on: ${{ matrix.os }}
-
+    defaults:
+      run:
+        shell: pwsh
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: ${{ matrix.arch }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install dependencies
+      - name: Install (project + dev group)
+        # [dependency-groups] needs pip >= 25.1 for --group
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          $PSNativeCommandUseErrorActionPreference = $true  # fail on the first failing command
+          python -m pip install --upgrade pip
+          python -m pip install -e . --group dev
+          python -c "import platform, sys; print(sys.version, platform.machine())"
 
-      - name: Build executable
-        run: pyinstaller -F -n winstaller main.py
+      - name: Ruff check
+        run: python -m ruff check $env:LINT_PATHS.Split(' ')
 
-      - name: Rename artifact
-        shell: bash
-        run: mv dist/winstaller.exe dist/winstaller-${{ matrix.arch }}.exe
+      - name: Ruff format
+        run: python -m ruff format --check $env:LINT_PATHS.Split(' ')
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Pytest
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -m "not perf" -ra
+
+      - name: Pytest (perf)
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # shared CI runners are slower and noisier than a dev machine
+          WINSTALLER_PERF_SLACK: "3"
+        run: |
+          python -m pytest -m perf -ra
+          # 5 = no tests collected (perf suite not present yet)
+          if ($LASTEXITCODE -eq 5) { Write-Host "No perf tests collected."; exit 0 }
+          exit $LASTEXITCODE
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+            machine: AMD64
+          - os: windows-11-arm
+            arch: arm64
+            machine: ARM64
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # Budgets for tools/measure_exe.py (local x64 reference: 25.2 MB, cold 1.1 s, warm 1.0 s).
+      WINSTALLER_BUDGET_SIZE_MB: "32"
+      WINSTALLER_BUDGET_COLD_S: "8"
+      WINSTALLER_BUDGET_WARM_S: "5"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: ${{ matrix.arch }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (project + dev group)
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true  # fail on the first failing command
+          python -m pip install --upgrade pip
+          python -m pip install -e . --group dev
+
+      - name: Check interpreter architecture
+        # the exe architecture is the architecture of the Python running PyInstaller
+        run: |
+          $machine = python -c "import platform; print(platform.machine())"
+          Write-Host "Python machine: $machine"
+          if ($machine -ne '${{ matrix.machine }}') { throw "Expected ${{ matrix.machine }}, got $machine" }
+
+      - name: Build winstaller.exe
+        run: python -m PyInstaller winstaller.spec --noconfirm --clean --workpath build --distpath dist
+
+      - name: Smoke test (winstaller.exe --smoke)
+        # Windowed exe: the call does not block, so wait explicitly; stdout is captured through
+        # the redirected handles. A timeout guards against an error dialog hanging the job.
+        run: |
+          $p = Start-Process -FilePath dist\winstaller.exe -ArgumentList '--smoke' -PassThru `
+            -NoNewWindow -RedirectStandardOutput smoke-out.txt -RedirectStandardError smoke-err.txt
+          $null = $p.Handle
+          if (-not $p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw 'smoke: timeout' }
+          $p.WaitForExit()
+          $out = Get-Content smoke-out.txt -Raw
+          Write-Host $out
+          Get-Content smoke-err.txt -Raw | Write-Host
+          if ($p.ExitCode -ne 0) { throw "smoke: exit code $($p.ExitCode)" }
+          if ($out -notmatch 'core modules: \d+ OK') { throw 'smoke: unexpected output' }
+          if ($out -notmatch 'arch: ${{ matrix.arch }}') { throw 'smoke: wrong architecture' }
+          if ($out -notmatch 'frozen: True') { throw 'smoke: not frozen' }
+
+      - name: Size and start-up budgets
+        run: python tools/measure_exe.py dist/winstaller.exe --json dist/measure-${{ matrix.arch }}.json
+
+      - name: Rename
+        run: Move-Item dist/winstaller.exe dist/winstaller-${{ matrix.arch }}.exe
+
+      - uses: actions/upload-artifact@v7
         with:
           name: winstaller-${{ matrix.arch }}
-          path: dist/winstaller-${{ matrix.arch }}.exe
-          retention-days: 1
+          path: |
+            dist/winstaller-${{ matrix.arch }}.exe
+            dist/measure-${{ matrix.arch }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  tag-version:
+    name: Tag matches version.py
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare tag with winstaller/core/version.py
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -nE 's/^[[:space:]]*return "([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' winstaller/core/version.py)
+          echo "tag=$TAG version.py=$version"
+          if [ -z "$version" ] || [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match winstaller/core/version.py ($version)"
+            exit 1
+          fi
 
   release:
-    name: Create Draft Release
-    needs: build
-    runs-on: ubuntu-latest
+    name: Draft release
     if: startsWith(github.ref, 'refs/tags/v')
-
+    needs: [build, tag-version]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
-      - name: Download x64 artifact
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
-          name: winstaller-x64
-          path: artifacts/
+          pattern: winstaller-*
+          path: release
+          merge-multiple: true
 
-      - name: Download arm64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: winstaller-arm64
-          path: artifacts/
+      - name: Checksums
+        working-directory: release
+        run: |
+          ls -l
+          sha256sum winstaller-x64.exe winstaller-arm64.exe > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
-      - name: Create draft release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            artifacts/winstaller-x64.exe
-            artifacts/winstaller-arm64.exe
+            release/winstaller-x64.exe
+            release/winstaller-arm64.exe
+            release/SHA256SUMS.txt

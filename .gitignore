@@ -6,6 +6,7 @@ __pycache__/
 # Pliki dystrybucji
 dist/
 build/
+build-out/
 *.egg-info/
 
 # Środowisko wirtualne
@@ -27,5 +28,3 @@ env/
 # Pliki systemowe
 .DS_Store
 Thumbs.db
-
-winstaller.spec

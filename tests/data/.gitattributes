@@ -1,0 +1,2 @@
+# Raw console captures: keep every byte (CR, ESC, code pages) exactly as recorded.
+*.bin binary

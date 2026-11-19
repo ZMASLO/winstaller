@@ -1,0 +1,40 @@
+Found 7-Zip [7zip.7zip]
+Version: 26.06
+Publisher: Igor Pavlov
+Publisher Url: https://7-zip.org/
+Publisher Support Url: https://7-zip.org/support.html
+Author: Igor Pavlov
+Moniker: 7zip
+Description: A file archiver with a high compression ratio.
+Homepage: https://7-zip.org/download.html
+License: LGPL-2.1
+License Url: https://7-zip.org/license.txt
+Copyright: Copyright © 1999-2026 Igor Pavlov.
+Release Notes:
+  - Improved support for split files created by "split" utility in Linux.
+  - Some bugs and vulnerabilities were fixed.
+Release Notes Url: https://github.com/ip7z/7zip/releases/tag/26.06
+Documentation:
+  FAQ: https://7-zip.org/faq.html
+Tags:
+  7zfiles
+  archive
+  archiver
+  compress
+  compression
+  decompress
+  decompression
+  extract
+  extractor
+  rarfiles
+  targzfiles
+  unarchive
+  unarchiver
+  unzip
+  zip
+Installer:
+  Installer Type: wix
+  Installer Url: https://github.com/ip7z/7zip/releases/download/26.06/7z2606-x64.msi
+  Installer SHA256: 6dc822569e777d9a3ecd5ffcbc22b55600af87e6c5d9810a64e8566cf5a4af9f
+  Release Date: 2026-11-07
+  Offline Distribution Supported: true
