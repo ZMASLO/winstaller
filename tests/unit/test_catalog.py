@@ -385,14 +385,6 @@ class TestValidation:
             entry = _item(requires_files=[rel])
         _bad(minimal_data(items=[entry]), "musi być względna")
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG (low) catalog._parse_item: drive-relative Windows paths such as 'D:setup.exe' "
-            "pass the os.path.isabs/'..' check, and Path(app_dir) / 'D:setup.exe' resolves "
-            "outside app_dir when app_dir is on another drive."
-        ),
-    )
     def test_drive_relative_path_rejected(self, tmp_path: Path) -> None:
         other = next(d for d in string.ascii_uppercase if f"{d}:" != tmp_path.drive.upper())
         entry = _item(kind="local_exe", winget_id=None, path=f"{other}:setup.exe")
@@ -418,15 +410,6 @@ class TestValidation:
     def test_section_must_be_array_of_tables(self, section: str) -> None:
         _bad(minimal_data(**{section: {"id": "x"}}), "musi być tablicą tabel")
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=TypeError,
-        reason=(
-            "BUG (low) catalog.parse_catalog: entries that are not tables (valid TOML such as "
-            "'categories = [1]' or 'items = [3]') crash with TypeError in _check_keys "
-            "instead of raising CatalogError."
-        ),
-    )
     @pytest.mark.parametrize("section", ["categories", "items", "profiles"])
     def test_non_table_entries_raise_catalog_error(self, section: str) -> None:
         with pytest.raises(CatalogError):
@@ -572,15 +555,6 @@ class TestAvailability:
             tmp_path / "DaVinci_Resolve_Studio_19.1.4_Windows.exe"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG catalog.resolve_relative: glob.glob(str(base / rel)) treats '[' ']' in the "
-            "app directory itself as wildcards, so a glob path (DaVinci installer) is never "
-            "found when the program sits in e.g. 'Pobrane [2]'. Fix: glob.glob(rel, root_dir=base) "
-            "or glob.escape(str(base))."
-        ),
-    )
     def test_glob_in_directory_with_brackets(self, tmp_path: Path) -> None:
         base = tmp_path / "Pobrane [2]"
         base.mkdir()
@@ -720,3 +694,81 @@ class TestQueries:
     def test_module_exports(self) -> None:
         assert cat_mod.ItemKind("local_exe") is ItemKind.LOCAL_EXE
         assert CategoryKind("tools") is CategoryKind.TOOLS
+
+
+# ------------------------------------------------------- stage 3 fixes
+
+
+class TestStage3Validation:
+    @pytest.mark.parametrize(
+        "rel", ["C:setup.exe", r"c:sub\setup.exe", r"\\server\share\x.exe", r"a\..\..\x"]
+    )
+    def test_drive_unc_and_dotdot_variants_rejected(self, rel: str) -> None:
+        entry = _item(kind="local_exe", winget_id=None, path=rel)
+        _bad(minimal_data(items=[entry]), "musi być względna")
+
+    @pytest.mark.parametrize("rel", ["setup.exe", r"procyon\procyon-setup.exe", "a/b.exe", "x..y"])
+    def test_ordinary_relative_paths_accepted(self, rel: str) -> None:
+        entry = _item(kind="local_exe", winget_id=None, path=rel)
+        assert parse_catalog(minimal_data(items=[entry])).item("x").path == rel
+
+    def test_non_table_entry_message_names_section(self) -> None:
+        _bad(minimal_data(items=[_item(), "oops"]), r"Sekcja 'items': wpis #2 musi być tabelą")
+
+    def test_duplicate_profile_items(self) -> None:
+        profile = {"id": "p", "name": "P", "items": ["a", "a"]}
+        _bad(minimal_data(profiles=[profile]), r"Profil 'p': zduplikowane pozycje w 'items': a")
+
+    def test_duplicate_profile_arch_items(self) -> None:
+        profile = {"id": "p", "name": "P", "items": [], "arch_items": {"x64": ["a", "a"]}}
+        _bad(minimal_data(profiles=[profile]), r"zduplikowane pozycje w 'arch_items.x64'")
+
+    def test_arch_items_type_error_names_the_field(self) -> None:
+        profile = {"id": "p", "name": "P", "arch_items": {"arm64": "a"}}
+        with pytest.raises(CatalogError) as exc:
+            parse_catalog(minimal_data(profiles=[profile]))
+        assert str(exc.value) == ("Profil 'p': pole 'arch_items.arm64' musi być listą tekstów.")
+
+    @pytest.mark.parametrize("confirm", ["", "   "])
+    def test_blank_confirm_is_not_destructive(self, confirm: str) -> None:
+        item = parse_catalog(minimal_data(items=[_item(confirm=confirm)])).item("x")
+        assert item.confirm is None and not item.destructive
+        assert not make_item("y", confirm="").destructive
+
+    def test_copy_dir_action_requires_folder_argument(self) -> None:
+        entry = _item(kind="action", winget_id=None, action="copy_dir_to_desktop")
+        _bad(minimal_data(items=[entry]), "wymaga nazwy folderu")
+
+    @pytest.mark.parametrize("arg", ["..", r"..\Windows", r"C:\Users", r"\Windows", "D:x"])
+    def test_copy_dir_action_argument_must_stay_inside(self, arg: str) -> None:
+        entry = _item(kind="action", winget_id=None, action="copy_dir_to_desktop", args=[arg])
+        _bad(minimal_data(items=[entry]), "musi być względna")
+
+    def test_other_actions_args_are_not_paths(self) -> None:
+        entry = _item(kind="action", winget_id=None, action="theme_dark", args=["..", "C:x"])
+        assert parse_catalog(minimal_data(items=[entry])).item("x").args == ("..", "C:x")
+
+
+class TestNaturalVersionGlob:
+    def test_highest_version_wins_not_lexicographic(self, tmp_path: Path) -> None:
+        for version in ("19.9", "19.10", "19.1.4", "9.99"):
+            (tmp_path / f"DaVinci_Resolve_Studio_{version}_Windows.exe").write_bytes(b"")
+        found = resolve_relative(tmp_path, "DaVinci_Resolve_Studio_*_Windows.exe")
+        assert found == tmp_path / "DaVinci_Resolve_Studio_19.10_Windows.exe"
+
+    def test_natural_key(self) -> None:
+        names = ["a_19.10", "a_19.9", "a_2", "A_19.9b", "a_19"]
+        assert sorted(names, key=cat_mod.natural_key) == [
+            "a_2",
+            "a_19",
+            "a_19.9",
+            "A_19.9b",
+            "a_19.10",
+        ]
+
+    def test_glob_in_subdirectory_with_brackets(self, tmp_path: Path) -> None:
+        base = tmp_path / "[x] Pobrane"
+        (base / "sub").mkdir(parents=True)
+        (base / "sub" / "Setup_1.exe").write_bytes(b"")
+        (base / "sub" / "Setup_12.exe").write_bytes(b"")
+        assert resolve_relative(base, r"sub\Setup_*.exe") == base / "sub" / "Setup_12.exe"

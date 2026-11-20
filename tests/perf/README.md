@@ -18,7 +18,7 @@ pytest-benchmark (`--benchmark-disable` też działa — testy mierzą wtedy sam
 | `baseline.json` | wynik pomiaru 1.1.8: maszyna, data (RRRR.MM.DD), wersja Pythona, liczba powtórzeń, mediana, min/max/odchylenie i surowe przebiegi |
 | `test_perf.py` | testy 2.0 porównujące z baseline'em i/lub z budżetami absolutnymi |
 
-Testy **nie importują starego kodu** (zostanie usunięty w etapie 3) — porównują się tylko z
+Testy **nie importują starego kodu** (usuniętego w etapie 3) — porównują się tylko z
 `baseline.json`. Żeby odświeżyć baseline (np. po zmianie próbek w `tests/data`, co wykrywa
 `test_corpus_is_the_one_baseline_was_measured_with` przez SHA256 korpusu), uruchom
 `measure_baseline.py` na kodzie wypakowanym z gałęzi `main`/tagu `v1.1.8` w osobnym venv z
@@ -38,6 +38,10 @@ Testy **nie importują starego kodu** (zostanie usunięty w etapie 3) — porów
 | brak `PySide6`/`requests`/`tkinter` po imporcie core i `--smoke` | `sys.modules` w podprocesie | — | lista pusta |
 | narzut `TaskRunner` | 1000 pustych zadań, listener zliczający | — | ≤ 200 µs na zadanie |
 | `stream_process` end-to-end | proces potomny wypisuje 50 000 linii, wszystkie muszą dojść w kolejności | — | ≥ 20 000 linii/s |
+| czas do pokazania okna (`test_ui_perf.py`) | świeży proces `python -m winstaller --dry-run --exit-after-show` (offscreen), czas od `Popen` do linii `window-shown`, mediana z 5 (po 1 rozgrzewkowym) | `window.time_to_window_s` 1.1.8 (świeży proces: `ModernApp` + 36 checkboxów + `update_idletasks`, ten sam sposób pomiaru) | ≤ baseline × kalibracja oraz ≤ 1.5 s |
+| `MainWindow()` + pierwsze malowanie | w procesie: motyw, konstrukcja okna, `show`, `grab()`; mediana z 5 | 1.1.8: construct + checkboxy + idletasks z `window.breakdown` | ≤ baseline × kalibracja oraz ≤ 300 ms |
+| filtr wyszukiwania na całym katalogu | `set_filter` na obu stronach wyboru + przeliczenie układu, najgorsza z median dla 6 fraz | — | ≤ 2 klatki (33 ms) |
+| zalew logu (`tests/ui/test_log_tools.py`) | 30 000 linii z wątku roboczego; najdłuższa przerwa w pętli zdarzeń GUI (timer 5 ms) | — | < 250 ms, całość < 5 s |
 
 Wszystkie progi mnoży `WINSTALLER_PERF_SLACK` (domyślnie 1, wartości < 1 ignorowane).
 Na tej maszynie (AMD Ryzen 5 8400F, Python 3.12.10, 2026.11.19) zapas wynosi 2.5–100×,
@@ -64,18 +68,17 @@ więc zwykły szum nie powinien wywracać testów.
 - Testy mierzą wątek wywołujący; przy równoległym uruchamianiu testów (np. `-n` xdist) wyniki
   tracą sens — perf uruchamiaj sekwencyjnie.
 
-## Etap późniejszy: start UI i exe (jeszcze nie napisane)
+## Start UI i exe
 
-Gdy powstanie `winstaller.ui` (PySide6), dojdą pomiary:
+`--exit-after-show` to ukryta flaga diagnostyczna (`python -m winstaller --dry-run
+--exit-after-show`): okno jest pokazywane, po pierwszej klatce (przetworzenie zdarzeń
+układu i malowania) proces wypisuje `window-shown <sekundy od utworzenia procesu>` i kończy
+się kodem 0. Nie uruchamia sprawdzania aktualizacji ani winget. Testy mierzą czas ścianowy
+od `Popen` (jak `measure_baseline.py` dla 1.1.8), czas z procesu jest tylko informacyjny.
 
-- **czas do pokazania okna**: świeży proces `python -m winstaller --dry-run --no-elevate`
-  (oraz zbudowany `winstaller.exe`) do pierwszego `QWindow.exposeEvent`/`showEvent` głównego
-  okna z listą pozycji katalogu — porównanie z `window.time_to_window_s` z `baseline.json`
-  (1.1.8: `ModernApp` + 36 checkboxów + `update_idletasks()`, mediana ~0.68 s na tej maszynie;
-  rozbicie na import / konstrukcję / checkboxy / idletasks w `window.breakdown`);
-- czas importu `winstaller.ui` (PySide6 ładowany dopiero tam) i to, że `--smoke` nadal nie
-  ładuje Qt;
-- start exe onefile PyInstallera (rozpakowanie `_MEI`) — 1.1.8 nie ma tu baseline'u w tym
-  pliku; trzeba by go zmierzyć na zbudowanym `winstaller-x64.exe` 1.1.8 z GitHub Releases;
-- płynność logu: liczba zdarzeń `output_*` na sekundę obsłużona przez most Qt bez blokowania
-  wątku GUI.
+Wynik na tej maszynie (2026.11.19): czas do okna 2.0 ≈ 0.44 s wobec 0.68 s w 1.1.8,
+`MainWindow()` + pierwsze malowanie ≈ 90 ms (1.1.8: 336 ms), filtr ≈ 1 ms.
+
+Zbudowany exe (onefile, rozpakowanie `_MEI`) mierzy `tools/measure_exe.py` (budżety rozmiaru
+i czasu `--smoke`); 1.1.8 nie ma tu baseline'u (trzeba by zmierzyć `winstaller-x64.exe` 1.1.8
+z GitHub Releases).

@@ -2,16 +2,20 @@
 
 Compatible with 1.x: tags are ``vX.Y.Z`` and assets are named
 ``winstaller-x64.exe`` / ``winstaller-arm64.exe``. The swap is done in Python:
-the running exe is renamed to ``<exe>.old`` (Windows allows renaming a running
-image), the new file is moved into place, the new process is started and the
-caller exits. ``cleanup_old`` removes the leftover on next start.
+the download is staged as ``<exe>.new`` next to the exe (copied when it is on
+another volume), the running exe is renamed to ``<exe>.old`` (Windows allows
+renaming a running image), the staged file is renamed into place, the new process
+is started and the caller exits. ``cleanup_old`` removes the leftover on next start.
 """
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -44,20 +48,32 @@ class UpdateCancelled(UpdateError):
 
 # ----------------------------------------------------------------- versions
 
-_SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+_SEMVER = re.compile(r"^[vV]?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+
+PreReleaseKey = tuple[tuple[int, int, str], ...]
+VersionKey = tuple[int, int, int, int, PreReleaseKey]
 
 
-def parse_version(text: str) -> tuple[int, int, int, int, str]:
-    """Sortable key for ``X.Y.Z[-pre]`` (optional ``v`` prefix).
+def _prerelease_key(pre: str) -> PreReleaseKey:
+    # SemVer 11.4: numeric identifiers compare numerically and sort below alphanumeric
+    # ones; a shorter list of equal identifiers sorts first (tuple comparison does that).
+    return tuple((0, int(part), "") if part.isdigit() else (1, 0, part) for part in pre.split("."))
 
-    A pre-release sorts below its release (``2.0.0-dev < 2.0.0``).
-    Raises ``ValueError`` for anything else.
+
+def parse_version(text: str) -> VersionKey:
+    """Sortable key for ``X.Y.Z[-pre][+build]`` (optional ``v``/``V`` prefix).
+
+    Ordered as SemVer: a pre-release sorts below its release (``2.0.0-dev < 2.0.0``),
+    pre-release identifiers are compared one by one (``rc.2 < rc.10``), build
+    metadata is ignored. Raises ``ValueError`` for anything else.
     """
     m = _SEMVER.match(text.strip())
     if not m:
         raise ValueError(f"Nieprawidłowy numer wersji: {text!r}")
     major, minor, patch, pre = m.groups()
-    return int(major), int(minor), int(patch), 0 if pre else 1, pre or ""
+    if pre and any(not part for part in pre.split(".")):
+        raise ValueError(f"Nieprawidłowy numer wersji: {text!r}")
+    return int(major), int(minor), int(patch), 0 if pre else 1, _prerelease_key(pre) if pre else ()
 
 
 def is_newer(candidate: str, current: str) -> bool:
@@ -110,6 +126,20 @@ def _parse_digest(value: Any) -> str | None:
     return None
 
 
+def _parse_size(value: Any) -> int:
+    if value is None or value == "":
+        return 0
+    if isinstance(value, bool):
+        raise UpdateError(f"Nieprawidłowy rozmiar pliku wydania: {value!r}")
+    try:
+        size = int(value)
+    except (TypeError, ValueError):
+        raise UpdateError(f"Nieprawidłowy rozmiar pliku wydania: {value!r}") from None
+    if size < 0:
+        raise UpdateError(f"Nieprawidłowy rozmiar pliku wydania: {value!r}")
+    return size
+
+
 def parse_release(data: dict[str, Any]) -> ReleaseInfo:
     """Build :class:`ReleaseInfo` from a GitHub ``releases/latest`` JSON object."""
     tag = data.get("tag_name")
@@ -119,14 +149,17 @@ def parse_release(data: dict[str, Any]) -> ReleaseInfo:
         parse_version(tag)
     except ValueError:
         raise UpdateError(f"Nieprawidłowy tag wydania: {tag}") from None
+    raw_assets = data.get("assets") or []
+    if not isinstance(raw_assets, list):
+        raise UpdateError("Nieprawidłowa lista plików wydania w odpowiedzi GitHub.")
     assets = tuple(
         ReleaseAsset(
             name=str(a.get("name", "")),
             url=str(a.get("browser_download_url", "")),
-            size=int(a.get("size") or 0),
+            size=_parse_size(a.get("size")),
             sha256=_parse_digest(a.get("digest")),
         )
-        for a in data.get("assets") or []
+        for a in raw_assets
         if isinstance(a, dict) and a.get("browser_download_url")
     )
     return ReleaseInfo(
@@ -279,6 +312,65 @@ def _spawn(exe: Path, args: list[str]) -> None:
     )
 
 
+def staged_path_for(exe: Path) -> Path:
+    """Where the new version is staged next to the exe before the atomic swap."""
+    return exe.with_name(exe.name + ".new")
+
+
+_ERROR_NOT_SAME_DEVICE = 17
+
+
+def _is_cross_device(exc: OSError) -> bool:
+    return getattr(exc, "winerror", None) == _ERROR_NOT_SAME_DEVICE or exc.errno == errno.EXDEV
+
+
+def _stage(new: Path, staged: Path) -> bool:
+    """Put ``new`` at ``staged`` (same directory as the exe). Returns True when copied.
+
+    A rename when both are on one volume; otherwise (download in %TEMP% on C:, exe
+    on a USB stick) a copy, so the final swap is still an atomic same-volume rename.
+    """
+    staged.unlink(missing_ok=True)
+    try:
+        os.replace(new, staged)
+        return False
+    except OSError as exc:
+        if not _is_cross_device(exc):
+            raise
+    try:
+        shutil.copyfile(new, staged)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            staged.unlink(missing_ok=True)
+        raise
+    return True
+
+
+def _unstage(new: Path, staged: Path, copied: bool) -> None:
+    """Best effort: give the downloaded file back (a retry needs no new download)."""
+    with contextlib.suppress(OSError):
+        if copied:
+            staged.unlink(missing_ok=True)
+        elif staged.exists() and not new.exists():
+            os.replace(staged, new)
+
+
+def _restore_original(current: Path, old: Path) -> None:
+    """Move the original exe back from ``old``; raise UpdateError if that is impossible."""
+    try:
+        os.replace(old, current)  # overwrites a new exe left at ``current``
+        return
+    except OSError as exc:
+        first_error = exc
+    try:  # e.g. the new exe is locked against rename/delete but not against writing
+        shutil.copyfile(old, current)
+    except OSError:
+        raise UpdateError(
+            f"Nie udało się przywrócić poprzedniej wersji programu ({first_error}). "
+            f"Oryginalny plik jest zachowany jako {old}."
+        ) from first_error
+
+
 def apply(
     new_exe: str | os.PathLike[str],
     *,
@@ -288,9 +380,12 @@ def apply(
 ) -> bool:
     """Replace the running exe with ``new_exe`` and start it.
 
-    Returns True when the caller must quit now. On failure the original exe is
-    restored and :class:`UpdateError` is raised. Without ``current_exe`` this
-    works only in a frozen build.
+    Steps: stage ``new_exe`` as ``<exe>.new`` (rename, or copy across volumes),
+    rename the running exe to ``<exe>.old``, rename the staged file to ``<exe>``,
+    start it. Returns True when the caller must quit now. On failure of any step
+    the original exe is put back first (then, best effort, the download is
+    restored) and :class:`UpdateError` is raised - also when the rollback itself
+    fails. Without ``current_exe`` this works only in a frozen build.
     """
     if current_exe is None:
         if not plat.is_frozen():
@@ -301,6 +396,7 @@ def apply(
     current = Path(current_exe)
     new = Path(new_exe)
     old = old_path_for(current)
+    staged = staged_path_for(current)
     if not new.is_file():
         raise UpdateError(f"Brak pobranego pliku aktualizacji: {new}")
     try:
@@ -308,21 +404,32 @@ def apply(
     except OSError as exc:
         raise UpdateError(f"Nie można usunąć poprzedniej kopii {old.name}: {exc}") from exc
     try:
+        copied = _stage(new, staged)
+    except OSError as exc:
+        raise UpdateError(f"Nie można podmienić pliku programu: {exc}") from exc
+    try:
         os.replace(current, old)
     except OSError as exc:
+        _unstage(new, staged, copied)
         raise UpdateError(f"Nie można zmienić nazwy działającego programu: {exc}") from exc
     try:
-        os.replace(new, current)
+        os.replace(staged, current)
     except OSError as exc:
-        os.replace(old, current)
+        _restore_original(current, old)
+        _unstage(new, staged, copied)
         raise UpdateError(f"Nie można podmienić pliku programu: {exc}") from exc
     if launch:
         try:
             _spawn(current, args or [])
         except OSError as exc:
-            os.replace(current, new)
-            os.replace(old, current)
+            if not new.exists():
+                with contextlib.suppress(OSError):
+                    shutil.copyfile(current, new)  # keep the download for a retry
+            _restore_original(current, old)
             raise UpdateError(f"Nie udało się uruchomić nowej wersji: {exc}") from exc
+    if copied:
+        with contextlib.suppress(OSError):
+            new.unlink(missing_ok=True)
     return True
 
 

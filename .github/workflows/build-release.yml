@@ -24,8 +24,6 @@ env:
   PYTHON_VERSION: "3.12"
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
   PYTHONUTF8: "1"
-  # Paths ruff checks: the 1.x code (main.py, core/, gui/) is legacy and not linted.
-  LINT_PATHS: winstaller tests tools packaging bump_version.py
 
 jobs:
   test:
@@ -62,12 +60,12 @@ jobs:
           python -c "import platform, sys; print(sys.version, platform.machine())"
 
       - name: Ruff check
-        run: python -m ruff check $env:LINT_PATHS.Split(' ')
+        run: python -m ruff check .
 
       - name: Ruff format
-        run: python -m ruff format --check $env:LINT_PATHS.Split(' ')
+        run: python -m ruff format --check .
 
-      - name: Pytest
+      - name: Pytest (unit + UI)
         env:
           QT_QPA_PLATFORM: offscreen
         run: python -m pytest -m "not perf" -ra
@@ -77,11 +75,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           # shared CI runners are slower and noisier than a dev machine
           WINSTALLER_PERF_SLACK: "3"
-        run: |
-          python -m pytest -m perf -ra
-          # 5 = no tests collected (perf suite not present yet)
-          if ($LASTEXITCODE -eq 5) { Write-Host "No perf tests collected."; exit 0 }
-          exit $LASTEXITCODE
+        run: python -m pytest -m perf -ra
 
   build:
     name: Build (${{ matrix.arch }})

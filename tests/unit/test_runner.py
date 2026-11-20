@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 from pathlib import Path
@@ -157,8 +158,12 @@ def test_summary_counters(catalog, tmp_path: Path) -> None:
     assert all(isinstance(r, TaskResult) for r in summary.results)
 
 
-def test_task_status_and_artifact_propagate(catalog, tmp_path: Path) -> None:
+def test_tasks_are_immutable_snapshots_and_artifact_propagates(catalog, tmp_path: Path) -> None:
+    # Contract (stage 3): listeners get frozen Task snapshots; the runner never
+    # mutates them later (the UI hands them to the GUI thread). Final statuses
+    # live in TaskResult.
     tasks: list[Task] = []
+    started: list[Task] = []
     artifact = tmp_path / "report.html"
 
     class Listener(NullListener):
@@ -166,7 +171,7 @@ def test_task_status_and_artifact_propagate(catalog, tmp_path: Path) -> None:
             tasks.extend(t)
 
         def task_started(self, task: Task) -> None:
-            assert task.status is TaskStatus.RUNNING
+            started.append(task)
 
     runner = TaskRunner(
         catalog,
@@ -176,11 +181,33 @@ def test_task_status_and_artifact_propagate(catalog, tmp_path: Path) -> None:
         app_dir=tmp_path,
     )
     summary = runner.run(["a", "gone"])
-    assert [t.status for t in tasks] == [TaskStatus.OK, TaskStatus.SKIPPED]
+    assert [t.status for t in tasks] == [TaskStatus.PENDING, TaskStatus.PENDING]
     assert [t.index for t in tasks] == [0, 1]
     assert tasks[0].item_id == "a"
+    assert [(t.item_id, t.index, t.status) for t in started] == [("a", 0, TaskStatus.RUNNING)]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        tasks[0].status = TaskStatus.OK  # type: ignore[misc]
+    assert [r.status for r in summary.results] == [TaskStatus.OK, TaskStatus.SKIPPED]
     assert summary.results[0].artifact == artifact
     assert summary.results[0].duration >= 0
+
+
+@pytest.mark.parametrize(
+    ("value", "status", "message"),
+    [
+        ("Zrobione.", TaskStatus.OK, "Zrobione."),
+        (None, TaskStatus.OK, "Gotowe."),
+        ("", TaskStatus.OK, "Gotowe."),
+        (42, TaskStatus.FAILED, "Nieoczekiwany błąd: nieprawidłowy wynik zadania (int)."),
+    ],
+)
+def test_executor_result_is_normalized(catalog, tmp_path: Path, value, status, message) -> None:
+    # Executors may return what an ActionFunc returns (str / None), not only ActionOutcome.
+    runner, _ = make_runner(catalog, tmp_path, lambda i, c: value)
+    summary = runner.run(["a", "b"])
+    assert [r.status for r in summary.results] == [status, status]
+    assert summary.results[0].message == message
+    assert not runner.is_running
 
 
 def test_task_status_finished_property() -> None:
@@ -308,6 +335,83 @@ def test_cancel_before_run_is_ignored(catalog, tmp_path: Path) -> None:
     assert summary.ok_count == 1 and not summary.cancelled
 
 
+def test_preset_cancel_event_cancels_everything(catalog, tmp_path: Path) -> None:
+    # The UI creates the event before starting the worker thread, so a Stop clicked
+    # before run() was even entered is never lost.
+    calls: list[str] = []
+    runner, listener = make_runner(catalog, tmp_path, lambda i, c: calls.append(i.id) or OK)
+    event = threading.Event()
+    event.set()
+    summary = runner.run(["a", "b"], cancel_event=event)
+    assert calls == []
+    assert [r.status for r in summary.results] == [TaskStatus.CANCELLED, TaskStatus.CANCELLED]
+    assert summary.cancelled
+    assert [n for n, _ in listener.names()] == [
+        "run_started",
+        "task_finished",
+        "task_finished",
+        "run_finished",
+    ]
+
+
+def test_cancel_event_set_from_other_thread_before_run_enters(catalog, tmp_path: Path) -> None:
+    # Race of stage 2: cancel() between thread start and run() replacing the event.
+    event = threading.Event()
+    gate = threading.Event()
+    runner, _ = make_runner(catalog, tmp_path)
+    result: list[RunSummary] = []
+
+    def worker() -> None:
+        gate.wait(5)  # cancel happens before run() is entered
+        result.append(runner.run(["a"], cancel_event=event))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    event.set()
+    gate.set()
+    thread.join(5)
+    assert result[0].results[0].status is TaskStatus.CANCELLED
+
+
+def test_cancel_method_uses_the_given_event(catalog, tmp_path: Path) -> None:
+    runner: TaskRunner
+    event = threading.Event()
+
+    def executor(item: Item, ctx: ActionContext) -> ActionOutcome:
+        assert ctx.cancel_event is event
+        runner.cancel()
+        return ActionOutcome(False, "x", cancelled=True)
+
+    runner, _ = make_runner(catalog, tmp_path, executor)
+    assert runner.run(["a"], cancel_event=event).cancelled
+    assert event.is_set()
+
+
+def test_cancel_after_last_task_is_not_a_cancelled_run(catalog, tmp_path: Path) -> None:
+    runner: TaskRunner
+
+    class LateCancel(RecordingListener):
+        def task_finished(self, result: TaskResult) -> None:
+            super().task_finished(result)
+            if result.item_id == "b":
+                runner.cancel()  # arrives after the last task already finished
+
+    listener = LateCancel()
+    runner = TaskRunner(
+        catalog, listener=listener, executor=ok_executor, arch="x64", app_dir=tmp_path
+    )
+    summary = runner.run(["a", "b"])
+    assert summary.ok_count == 2
+    assert not summary.cancelled
+
+
+def test_cancel_after_run_does_not_leak_into_next_run(catalog, tmp_path: Path) -> None:
+    runner, _ = make_runner(catalog, tmp_path)
+    runner.run(["a"])
+    runner.cancel()
+    assert not runner.run(["a"]).cancelled
+
+
 def test_runner_reusable_after_cancelled_run(catalog, tmp_path: Path) -> None:
     runner: TaskRunner
 
@@ -365,13 +469,15 @@ def test_reentrant_run_from_executor_raises(catalog, tmp_path: Path) -> None:
     assert len(errors) == 1
 
 
-@pytest.mark.parametrize("method", ["run_started", "task_started", "task_finished", "run_finished"])
-def test_listener_exception_propagates_and_resets_is_running(
-    catalog, tmp_path: Path, method: str
-) -> None:
-    # Behaviour pinned: a broken listener aborts the run (the exception reaches the
-    # caller), but the runner must not stay "running" forever.
-    class Broken(NullListener):
+@pytest.mark.parametrize(
+    "method",
+    ["run_started", "task_started", "output_line", "task_finished", "run_finished"],
+)
+def test_listener_exception_does_not_abort_the_run(catalog, tmp_path: Path, method: str) -> None:
+    # Contract (stage 3, previously "propagates and aborts the run"): a broken
+    # listener never aborts the run nor changes task statuses; every other event is
+    # still delivered (run_finished included) and the error is recorded.
+    class Broken(RecordingListener):
         pass
 
     def boom(*args, **kwargs):
@@ -382,16 +488,22 @@ def test_listener_exception_propagates_and_resets_is_running(
     runner = TaskRunner(
         catalog, listener=listener, executor=ok_executor, arch="x64", app_dir=tmp_path
     )
-    with pytest.raises(LookupError):
-        runner.run(["a", "b"])
+    summary = runner.run(["a", "b"])
+    assert summary.ok_count == 2
     assert not runner.is_running
+    assert runner.listener_errors and all(
+        e.startswith(f"{method}: LookupError: listener bug") for e in runner.listener_errors
+    )
+    names = [n for n, _ in listener.events]
+    if method != "run_finished":
+        assert names[-1] == "run_finished"
     runner.listener = NullListener()
     assert runner.run(["a"]).ok_count == 1
+    assert runner.listener_errors == []  # reset per run
 
 
-def test_listener_exception_inside_task_output_fails_only_that_task(
-    catalog, tmp_path: Path
-) -> None:
+def test_listener_exception_inside_task_output_keeps_task_ok(catalog, tmp_path: Path) -> None:
+    # Contract (stage 3, previously FAILED): a listener bug is not the task's failure.
     class Picky(RecordingListener):
         def output_line(self, text: str) -> None:
             if text == "explode":
@@ -403,11 +515,28 @@ def test_listener_exception_inside_task_output_fails_only_that_task(
     def executor(item: Item, ctx: ActionContext) -> ActionOutcome:
         if item.id == "a":
             ctx.log("explode")
+            ctx.log("after")
         return OK
 
     runner = TaskRunner(catalog, listener=listener, executor=executor, arch="x64", app_dir=tmp_path)
     summary = runner.run(["a", "b"])
-    assert [r.status for r in summary.results] == [TaskStatus.FAILED, TaskStatus.OK]
+    assert [r.status for r in summary.results] == [TaskStatus.OK, TaskStatus.OK]
+    assert ("output_line", "after") in listener.events
+    assert runner.listener_errors == ["output_line: LookupError: listener bug"]
+
+
+def test_system_access_blocked_from_listener_is_not_swallowed(catalog, tmp_path: Path) -> None:
+    # Only Exception is caught: BaseException (KeyboardInterrupt, the test guard) escapes.
+    class Interrupting(NullListener):
+        def task_started(self, task: Task) -> None:
+            raise KeyboardInterrupt
+
+    runner = TaskRunner(
+        catalog, listener=Interrupting(), executor=ok_executor, arch="x64", app_dir=tmp_path
+    )
+    with pytest.raises(KeyboardInterrupt):
+        runner.run(["a"])
+    assert not runner.is_running
 
 
 # ------------------------------------------------------------- construction

@@ -32,11 +32,20 @@ from dataclasses import dataclass, field
 
 import pytest
 
+# Qt tests (tests/ui, the in-process perf tests) always run offscreen, before any
+# QApplication exists. The offscreen platform has no font database of its own on
+# Windows: point it at the system fonts (as tools/screenshots.py does).
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault(
+    "QT_QPA_FONTDIR", os.path.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "Fonts")
+)
+
 _WINSTALLER_ENV = (
     "WINSTALLER_ARCH",
     "WINSTALLER_APP_DIR",
     "WINSTALLER_DRY_RUN_FAIL",
     "WINSTALLER_DRY_RUN_DELAY",
+    "WINSTALLER_FAKE_UPDATE",
 )
 
 _REGISTRY_WRITERS = (
@@ -192,3 +201,12 @@ def system_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[Guard]:
             "System access attempted during the test:\n  " + "\n  ".join(guard.violations),
             pytrace=False,
         )
+
+
+@pytest.fixture(scope="session")
+def qapp() -> Iterator[object]:
+    """pytest-qt's application, created exactly as ``winstaller.ui.app`` does (Fusion,
+    fonts). Imported lazily: tests that do not use Qt never load PySide6."""
+    from winstaller.ui.app import create_application
+
+    yield create_application(["winstaller-tests"])

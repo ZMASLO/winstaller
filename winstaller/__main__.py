@@ -29,6 +29,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="symulacja bez zmian w systemie")
     parser.add_argument("--version", action="store_true", help="wypisz wersję i zakończ")
     parser.add_argument("--no-elevate", action="store_true", help="nie proś o uprawnienia admina")
+    # Diagnostics only (tests/perf): exit right after the first frame of the window.
+    parser.add_argument("--exit-after-show", action="store_true", help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
 
@@ -84,6 +86,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 2
         raise
+    if args.exit_after_show:
+        return int(run(dry_run=args.dry_run, exit_after_show=True))
     return int(run(dry_run=args.dry_run))
 
 

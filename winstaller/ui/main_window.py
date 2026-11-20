@@ -368,7 +368,7 @@ class MainWindow(QMainWindow):
         return fn(self, request) if fn is not None else ask(self, request)
 
     def _confirm_destructive(self, items: list[Item]) -> bool:
-        risky = [i for i in items if i.confirm]
+        risky = [i for i in items if i.destructive]
         if not risky:
             return True
         n = len(risky)
@@ -407,10 +407,6 @@ class MainWindow(QMainWindow):
         return True
 
     def stop_run(self) -> None:
-        if self.run.state == RunState.STARTING:
-            # cancel() before run_started is ignored by core: retry once it started
-            QTimer.singleShot(50, self.stop_run)
-            return
         if self.run.cancel():
             self.run_page.set_stopping()
 
@@ -481,7 +477,7 @@ class MainWindow(QMainWindow):
         if self.run.busy or self.tools.is_running(item_id):
             return False
         item = self.services.catalog.item(item_id)
-        if item.confirm and not self._confirm(
+        if item.destructive and not self._confirm(
             ConfirmRequest(
                 title=item.name,
                 message=item.confirm,

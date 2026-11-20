@@ -2,12 +2,14 @@
 
 ``TaskRunner.run`` is synchronous and executes on the caller's thread; all
 listener methods are called on that same thread. The UI runs it on a worker
-thread and marshals events to the GUI thread itself. ``cancel`` is thread-safe.
+thread and marshals events to the GUI thread itself. ``cancel`` is thread-safe;
+``run(..., cancel_event=...)`` lets the caller cancel without a start-up race.
 """
 
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import threading
 import time
@@ -23,6 +25,8 @@ from winstaller.core.actions import ActionContext, ActionError, ActionOutcome
 from winstaller.core.catalog import Catalog, Item, ItemKind
 from winstaller.core.platform import Arch
 
+_log = logging.getLogger(__name__)
+
 
 class TaskStatus(StrEnum):
     PENDING = "pending"
@@ -37,9 +41,14 @@ class TaskStatus(StrEnum):
         return self not in (TaskStatus.PENDING, TaskStatus.RUNNING)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Task:
-    """One queued item. ``status`` is updated by the runner thread."""
+    """Immutable snapshot of one queued item, as passed to the listener.
+
+    ``run_started`` receives snapshots with status PENDING and ``task_started`` a
+    RUNNING one; the final status is in :class:`TaskResult`. Listeners may keep
+    the objects (e.g. hand them to another thread): the runner never mutates them.
+    """
 
     item: Item
     index: int
@@ -122,7 +131,9 @@ class NullListener:
         pass
 
 
-Executor = Callable[[Item, ActionContext], ActionOutcome]
+#: Returns an :class:`ActionOutcome`; like an ``ActionFunc`` it may also return a
+#: success message (``str``) or ``None``, which the runner normalizes.
+Executor = Callable[[Item, ActionContext], "ActionOutcome | str | None"]
 
 
 # ----------------------------------------------------------------- dry run
@@ -238,14 +249,22 @@ class TaskRunner:
         self._cancel_event = threading.Event()
         self._lock = threading.Lock()
         self._running = False
+        #: Exceptions raised by listener methods during the last run ("method: Type: msg").
+        self.listener_errors: list[str] = []
 
     @property
     def is_running(self) -> bool:
         return self._running
 
     def cancel(self) -> None:
-        """Stop the current task (kills its process) and cancel the remaining ones."""
-        self._cancel_event.set()
+        """Stop the current task (kills its process) and cancel the remaining ones.
+
+        Thread-safe. Affects only a run in progress; calling it while no run is
+        active does nothing. To cancel a run that may not have entered :meth:`run`
+        yet (no start-up race), pass your own ``cancel_event`` to :meth:`run`.
+        """
+        with self._lock:
+            self._cancel_event.set()
 
     def _ordered_items(self, item_ids: Iterable[str]) -> list[Item]:
         if self.preserve_order:
@@ -253,88 +272,122 @@ class TaskRunner:
             return [self.catalog.item(i) for i in ids]
         return [self.catalog.item(i) for i in self.catalog.in_catalog_order(item_ids)]
 
-    def run(self, item_ids: Iterable[str]) -> RunSummary:
+    def run(
+        self, item_ids: Iterable[str], *, cancel_event: threading.Event | None = None
+    ) -> RunSummary:
         """Run items (catalog order unless ``preserve_order``). Blocks until done.
 
-        Unknown ids raise :class:`CatalogError` before anything starts.
+        ``cancel_event``: set it (from any thread, at any time, even before this
+        call) to cancel this run; an event that is already set cancels every task.
+        Without it a fresh event is used and only :meth:`cancel` during the run
+        cancels. Unknown ids raise :class:`CatalogError` before anything starts.
         Unavailable items become SKIPPED; an exception in a task makes it FAILED
-        and the run continues.
+        and the run continues. Exceptions raised by listener methods never abort
+        the run or change a task's status: they are logged (``logging``) and
+        collected in :attr:`listener_errors`.
         """
         items = self._ordered_items(item_ids)
         with self._lock:
             if self._running:
                 raise RuntimeError("TaskRunner.run() jest już w toku.")
             self._running = True
-            self._cancel_event = threading.Event()
+            self._cancel_event = cancel_event if cancel_event is not None else threading.Event()
+            self.listener_errors = []
+            event = self._cancel_event
         try:
-            return self._run(items)
+            return self._run(items, event)
         finally:
-            self._running = False
+            with self._lock:
+                self._running = False
+                # A cancel() after the run must not leak into a later run.
+                self._cancel_event = threading.Event()
 
-    def _run(self, items: list[Item]) -> RunSummary:
-        listener = self.listener
-        tasks = [Task(item, n) for n, item in enumerate(items)]
+    # -- listener calls: a broken listener must not break the run
+    def _notify(self, method: str, *args: object) -> None:
+        try:
+            getattr(self.listener, method)(*args)
+        except Exception as exc:
+            self.listener_errors.append(f"{method}: {type(exc).__name__}: {exc}")
+            _log.warning(
+                "Listener %s.%s failed", type(self.listener).__name__, method, exc_info=True
+            )
+
+    def _log_line(self, text: str) -> None:
+        self._notify("output_line", text)
+
+    def _replace_last(self, text: str) -> None:
+        self._notify("output_replace_last", text)
+
+    def _run(self, items: list[Item], cancel_event: threading.Event) -> RunSummary:
         started = time.monotonic()
-        listener.run_started(tuple(tasks))
+        self._notify("run_started", tuple(Task(item, n) for n, item in enumerate(items)))
         results: list[TaskResult] = []
-        for task in tasks:
-            if self._cancel_event.is_set():
-                result = self._finish(task, TaskStatus.CANCELLED, "Anulowano.", 0.0)
+        for n, item in enumerate(items):
+            if cancel_event.is_set():
+                result = self._finish(item, TaskStatus.CANCELLED, "Anulowano.", 0.0)
             else:
-                result = self._run_task(task)
+                result = self._run_task(Task(item, n), cancel_event)
             results.append(result)
-        summary = RunSummary(
-            tuple(results), time.monotonic() - started, self._cancel_event.is_set()
-        )
-        listener.run_finished(summary)
+        # "Cancelled" means a task was actually cancelled, not merely that cancel()
+        # arrived after the last task had already finished.
+        cancelled = any(r.status == TaskStatus.CANCELLED for r in results)
+        summary = RunSummary(tuple(results), time.monotonic() - started, cancelled)
+        self._notify("run_finished", summary)
         return summary
 
     def _finish(
         self,
-        task: Task,
+        item: Item,
         status: TaskStatus,
         message: str,
         duration: float,
         artifact: Path | None = None,
     ) -> TaskResult:
-        task.status = status
-        result = TaskResult(task.item.id, status, message, duration, artifact)
-        self.listener.task_finished(result)
+        result = TaskResult(item.id, status, message, duration, artifact)
+        self._notify("task_finished", result)
         return result
 
-    def _run_task(self, task: Task) -> TaskResult:
+    def _run_task(self, task: Task, cancel_event: threading.Event) -> TaskResult:
         item = task.item
         availability = self.catalog.availability(item, arch=self.arch, base_dir=self.app_dir)
         if not availability.available:
             return self._finish(
-                task, TaskStatus.SKIPPED, availability.reason or "Niedostępne.", 0.0
+                item, TaskStatus.SKIPPED, availability.reason or "Niedostępne.", 0.0
             )
 
-        task.status = TaskStatus.RUNNING
-        self.listener.task_started(task)
-        self.listener.output_line(f"--- {item.name} ---")
+        self._notify("task_started", Task(item, task.index, TaskStatus.RUNNING))
+        self._log_line(f"--- {item.name} ---")
         ctx = ActionContext(
             item=item,
-            log=self.listener.output_line,
-            replace_last=self.listener.output_replace_last,
-            cancel_event=self._cancel_event,
+            log=self._log_line,
+            replace_last=self._replace_last,
+            cancel_event=cancel_event,
             app_dir=self.app_dir,
             arch=self.arch,
         )
         t0 = time.monotonic()
         try:
-            outcome = self._executor(item, ctx)
+            outcome = _normalize(self._executor(item, ctx))
         except ActionError as exc:
             outcome = ActionOutcome(False, str(exc))
         except Exception as exc:  # one broken task must not stop the whole run
             outcome = ActionOutcome(False, f"Nieoczekiwany błąd: {type(exc).__name__}: {exc}")
         duration = time.monotonic() - t0
 
-        if outcome.cancelled or (not outcome.ok and self._cancel_event.is_set()):
+        if outcome.cancelled or (not outcome.ok and cancel_event.is_set()):
             status = TaskStatus.CANCELLED
         elif outcome.ok:
             status = TaskStatus.OK
         else:
             status = TaskStatus.FAILED
-        self.listener.output_line(outcome.message)
-        return self._finish(task, status, outcome.message, duration, outcome.artifact)
+        self._log_line(outcome.message)
+        return self._finish(item, status, outcome.message, duration, outcome.artifact)
+
+
+def _normalize(value: object) -> ActionOutcome:
+    """Executor result -> ActionOutcome (``str``/``None`` mean success, like ActionFunc)."""
+    if value is None or isinstance(value, (ActionOutcome, str)):
+        return actions.as_outcome(value)
+    return ActionOutcome(
+        False, f"Nieoczekiwany błąd: nieprawidłowy wynik zadania ({type(value).__name__})."
+    )

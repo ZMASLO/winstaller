@@ -56,3 +56,12 @@ markers = [
     "perf: performance benchmarks (pytest-benchmark)",
     "ui: Qt UI tests (pytest-qt, offscreen)",
 ]
+# Any Qt warning (qWarning/qCritical) emitted during a test fails it (pytest-qt);
+# exceptions raised inside Qt slots/virtuals fail the test too (pytest-qt default).
+qt_log_level_fail = "WARNING"
+qt_api = "pyside6"
+# An exception that escapes a worker thread (or a __del__) fails the test as well.
+filterwarnings = [
+    "error::pytest.PytestUnhandledThreadExceptionWarning",
+    "error::pytest.PytestUnraisableExceptionWarning",
+]

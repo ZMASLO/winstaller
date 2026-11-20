@@ -1,1 +1,0 @@
-# Plik inicjalizacyjny pakietu gui 

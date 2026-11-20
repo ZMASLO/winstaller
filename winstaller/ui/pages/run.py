@@ -356,6 +356,7 @@ class RunPage(QWidget):
         lay.addWidget(self.log_view, 2)
         self.stack.addWidget(active)
         self.last_summary: RunSummary | None = None
+        self._stopping = False
         theme.changed.connect(self._on_theme)
         self._set_buttons(running=False, finished=False)
 
@@ -387,16 +388,25 @@ class RunPage(QWidget):
         self.cursor.setVisible(True)
         self.cursor.set_blinking(True)
         self._set_buttons(running=True, finished=False)
-        self.stop_button.setEnabled(False)  # enabled after run_started (see set_running)
+        # The run owns its cancel event from the start, so Stop works immediately.
+        self._stopping = False
+        self.stop_button.setEnabled(True)
+        self.stop_button.setText("Stop")
         self._update_counter()
         self._update_clock()
 
     def set_running(self) -> None:
-        """``run_started`` arrived: cancellation is now possible."""
-        self.stop_button.setEnabled(True)
-        self.stop_button.setText("Stop")
+        """``run_started`` arrived (a Stop clicked before it stays in effect)."""
+        if not self._stopping:
+            self.stop_button.setEnabled(True)
+            self.stop_button.setText("Stop")
+
+    @property
+    def stopping(self) -> bool:
+        return self._stopping
 
     def set_stopping(self) -> None:
+        self._stopping = True
         self.stop_button.setEnabled(False)
         self.stop_button.setText("Zatrzymywanie…")
         self._status_text = "Zatrzymywanie — czekam na zakończenie bieżącego procesu…"
@@ -407,7 +417,7 @@ class RunPage(QWidget):
         row = self.model.row_for(item_id)
         if row is not None:
             self.current_label.setText(row.item.name)
-            if self.stop_button.isEnabled():
+            if not self._stopping:
                 self._status_text = f"W toku · {row.item.description or row.item.name}"
             self._update_clock()
             n = self.model.row_index(item_id)

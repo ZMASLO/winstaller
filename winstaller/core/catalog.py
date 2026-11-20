@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import tomllib
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 from winstaller.core import platform as plat
@@ -65,8 +66,8 @@ class Item:
 
     @property
     def destructive(self) -> bool:
-        """True when the UI must ask for confirmation (text in :attr:`confirm`)."""
-        return self.confirm is not None
+        """True when the UI must ask for confirmation (non-blank text in :attr:`confirm`)."""
+        return bool(self.confirm and self.confirm.strip())
 
     def supports(self, arch: Arch) -> bool:
         return arch in self.arch
@@ -95,16 +96,31 @@ _AVAILABLE = Availability(True, None)
 _ARCH_LABEL: dict[str, str] = {"x64": "x64", "arm64": "ARM64"}
 
 
+_NUMBER_RUN = re.compile(r"(\d+)")
+
+
+def natural_key(text: str) -> tuple[tuple[int, int, str], ...]:
+    """Sort key comparing digit runs numerically (``19.10`` > ``19.9``), text case-insensitively."""
+    return tuple(
+        (0, int(part), "") if n % 2 else (1, 0, part.casefold())
+        for n, part in enumerate(_NUMBER_RUN.split(text))
+        if part
+    )
+
+
 def resolve_relative(base: Path, rel: str) -> Path | None:
     """Resolve ``rel`` (may contain glob wildcards) against ``base``.
 
-    With wildcards the lexicographically last match wins, so the newest
-    ``..._19.1_...`` style versioned installer is picked.
+    Only ``rel`` is a pattern: ``[``/``]`` in ``base`` are literal. With several
+    matches the highest version wins (natural sort: ``19.10`` > ``19.9``), so the
+    newest ``..._19.1_...`` style versioned installer is picked.
     """
     candidate = base / rel
     if glob.has_magic(rel):
-        matches = sorted(glob.glob(str(candidate)))
-        return Path(matches[-1]) if matches else None
+        matches = glob.glob(os.path.join(glob.escape(str(base)), rel))
+        if not matches:
+            return None
+        return Path(max(matches, key=lambda m: natural_key(os.path.relpath(m, base))))
     return candidate if candidate.exists() else None
 
 
@@ -302,6 +318,25 @@ def _parse_category(entry: Mapping[str, Any], order: int) -> Category:
     )
 
 
+#: Actions whose ``args[0]`` is a folder relative to the program directory.
+_FOLDER_ARG_ACTIONS = frozenset({"copy_dir_to_desktop"})
+
+
+def is_relative_inside(rel: str) -> bool:
+    """True for a path relative to the program directory that cannot leave it.
+
+    Rejects absolute paths, drive-relative ones (``D:setup.exe``), rooted ones
+    (``\\Windows``) and any ``..`` component (both separators count).
+    """
+    pure = PureWindowsPath(rel)
+    return bool(rel.strip()) and not pure.drive and not pure.root and ".." not in pure.parts
+
+
+def _check_relative(rel: str, where: str) -> None:
+    if not is_relative_inside(rel):
+        raise CatalogError(f"{where}: ścieżka {rel!r} musi być względna wobec katalogu programu.")
+
+
 def _parse_item(entry: Mapping[str, Any], index: int, known_actions: Collection[str]) -> Item:
     where = f"Pozycja #{index + 1}"
     _check_keys(entry, _ITEM_KEYS, where)
@@ -328,11 +363,14 @@ def _parse_item(entry: Mapping[str, Any], index: int, known_actions: Collection[
     elif action:
         raise CatalogError(f"{where}: pole 'action' jest dozwolone tylko dla rodzaju 'action'.")
 
+    args = _str_list(entry, "args", where)
     for rel in (*_str_list(entry, "requires_files", where), *([path] if path else [])):
-        if os.path.isabs(rel) or ".." in Path(rel).parts:
-            raise CatalogError(
-                f"{where}: ścieżka {rel!r} musi być względna wobec katalogu programu."
-            )
+        _check_relative(rel, where)
+    if action in _FOLDER_ARG_ACTIONS:
+        if not args:
+            raise CatalogError(f"{where}: akcja {action!r} wymaga nazwy folderu w 'args'.")
+        _check_relative(args[0], where)
+    confirm = _str(entry, "confirm", where, required=False)
 
     return Item(
         id=iid,  # type: ignore[arg-type]
@@ -343,11 +381,11 @@ def _parse_item(entry: Mapping[str, Any], index: int, known_actions: Collection[
         winget_id=winget_id,
         action=action,
         path=path,
-        args=_str_list(entry, "args", where),
+        args=args,
         arch=_arch_list(_str_list(entry, "arch", where), where),
         requires_files=_str_list(entry, "requires_files", where),
         post_launch=_str(entry, "post_launch", where, required=False),
-        confirm=_str(entry, "confirm", where, required=False),
+        confirm=confirm if confirm and confirm.strip() else None,
         unavailable=_str(entry, "unavailable", where, required=False),
     )
 
@@ -363,7 +401,7 @@ def _parse_profile(entry: Mapping[str, Any], index: int) -> Profile:
     arch_items: dict[Arch, tuple[str, ...]] = {}
     for arch, ids in arch_raw.items():
         (key,) = _arch_list((arch,), where)
-        arch_items[key] = _str_list({"v": ids}, "v", f"{where} (arch_items.{arch})")
+        arch_items[key] = _str_list({f"arch_items.{arch}": ids}, f"arch_items.{arch}", where)
     return Profile(
         id=pid,  # type: ignore[arg-type]
         name=_str(entry, "name", where),  # type: ignore[arg-type]
@@ -395,6 +433,13 @@ def parse_catalog(
         if not isinstance(data.get(section, []), list):
             raise CatalogError(f"Sekcja {section!r} musi być tablicą tabel ([[{section}]]).")
 
+    for section in ("categories", "items", "profiles"):
+        for n, entry in enumerate(data.get(section, [])):
+            if not isinstance(entry, dict):
+                raise CatalogError(
+                    f"Sekcja {section!r}: wpis #{n + 1} musi być tabelą ([[{section}]]), "
+                    f"a jest {type(entry).__name__}."
+                )
     categories = [_parse_category(e, n) for n, e in enumerate(data.get("categories", []))]
     items = [_parse_item(e, n, known_actions) for n, e in enumerate(data.get("items", []))]
     profiles = [_parse_profile(e, n) for n, e in enumerate(data.get("profiles", []))]
@@ -411,6 +456,15 @@ def parse_catalog(
         if it.category not in category_ids:
             raise CatalogError(f"Pozycja {it.id!r}: nieznana kategoria {it.category!r}.")
     for prof in profiles:
+        for label, ids in (
+            ("items", prof.items),
+            *((f"arch_items.{a}", v) for a, v in prof.arch_items.items()),
+        ):
+            dupes = sorted(i for i, n in Counter(ids).items() if n > 1)
+            if dupes:
+                raise CatalogError(
+                    f"Profil {prof.id!r}: zduplikowane pozycje w {label!r}: {', '.join(dupes)}."
+                )
         refs = [*prof.items, *(i for ids in prof.arch_items.values() for i in ids)]
         missing = sorted({r for r in refs if r not in item_by_id})
         if missing:

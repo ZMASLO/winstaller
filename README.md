@@ -28,7 +28,8 @@ Najnowsza wersja jest na stronie [Releases](https://github.com/ZMASLO/winstaller
 ## Uruchomienie
 
 Pobierz plik `.exe` i uruchom go. Nie wymaga instalacji. Zaznacz programy albo wybierz profil
-i kliknij „Uruchom”. Postęp i wynik każdej pozycji widać w logu; nieudane pozycje można ponowić.
+i kliknij „Zainstaluj”. Postęp i wynik każdej pozycji widać na stronie „Przebieg”; nieudane
+pozycje można ponowić przyciskiem „Ponów nieudane”. Pełny log sesji jest w „Dzienniku”.
 
 ### Pliki lokalne obok exe
 
@@ -58,14 +59,14 @@ D:\Narzedzia\
 ## Aktualizacje
 
 Winstaller sprawdza na GitHub Releases, czy jest nowsza wersja, i pobiera plik
-dla swojej architektury, weryfikuje rozmiar i sumę SHA256, podmienia exe i uruchamia się
-ponownie. Nigdy nie instaluje starszej wersji. Wersje 1.1.x aktualizują się do 2.x tą samą drogą.
+dla swojej architektury, weryfikuje rozmiar i sumę SHA256, podmienia exe (także uruchomiony
+z pendrive'a) i uruchamia się ponownie; przy błędzie przywraca poprzednią wersję. Nigdy nie instaluje starszej wersji. Wersje 1.1.x aktualizują się do 2.x tą samą drogą.
 
 ## Dla deweloperów
 
 Wymagany Python 3.12+. Kod 2.0 jest w pakiecie `winstaller/` (rdzeń `winstaller/core/` bez Qt,
-interfejs PySide6 w `winstaller/ui/`). Katalog `main.py`, `core/`, `gui/` to stary kod 1.1.8
-(tylko punkt odniesienia). Zależności są zdefiniowane wyłącznie w `pyproject.toml`.
+interfejs PySide6 w `winstaller/ui/`). Stary kod 1.1.8 został usunięty (jest w historii gita,
+tag `v1.1.8`). Zależności są zdefiniowane wyłącznie w `pyproject.toml`.
 
 ```powershell
 python -m venv .venv
@@ -88,11 +89,10 @@ W trybie `--dry-run`: `WINSTALLER_DRY_RUN_FAIL=id1,id2` (albo `*`) symuluje bł�
 ### Testy i lint
 
 ```powershell
-$env:QT_QPA_PLATFORM = "offscreen"
-.venv\Scripts\python -m pytest -m "not perf"     # testy jednostkowe i UI
-.venv\Scripts\python -m pytest -m perf           # benchmarki wydajności
-.venv\Scripts\python -m ruff check winstaller tests tools packaging bump_version.py
-.venv\Scripts\python -m ruff format winstaller tests tools packaging bump_version.py
+.venv\Scripts\python -m pytest -m "not perf"     # testy jednostkowe i UI (offscreen)
+.venv\Scripts\python -m pytest -m ui             # tylko UI (pytest-qt)
+.venv\Scripts\python -m pytest -m perf           # wydajność, porównanie z 1.1.8
+.venv\Scripts\python -m ruff check . ; .venv\Scripts\python -m ruff format --check .
 ```
 
 ### Build
@@ -103,7 +103,8 @@ $env:QT_QPA_PLATFORM = "offscreen"
 .\tools\build.ps1 -OutDir C:\tmp\wb   # inny katalog roboczy
 ```
 
-Build używa `winstaller.spec` (PyInstaller, jeden plik, bez konsoli, bez UPX). Architektura exe
+Build używa `winstaller.spec` (PyInstaller, jeden plik, bez konsoli, bez UPX, ikona
+`packaging/winstaller.ico` generowana przez `tools\make_icon.py`). Architektura exe
 jest taka jak architektura Pythona, którym uruchamiasz build: exe ARM64 buduje się natywnym
 Pythonem ARM64. Aplikacja sama prosi o uprawnienia administratora w trakcie działania, więc
 `--smoke`, `--version` i `--dry-run` nie wywołują UAC.

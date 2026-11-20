@@ -10,12 +10,12 @@ APP_NAME = "Winstaller"
 
 
 def get_version() -> str:
-    return "1.1.8"
+    return "2.0.0"
 
 
 VERSION = get_version()
 
 
 def get_version_info() -> str:
-    """Human readable name with version, e.g. ``"Winstaller 1.1.8"``."""
+    """Human readable name with version, e.g. ``"Winstaller 2.0.0"``."""
     return f"{APP_NAME} {VERSION}"

@@ -16,6 +16,7 @@ from tests.support import (
     sample,
     split_at,
 )
+from winstaller.core import winget
 from winstaller.core.winget import OutputEvent, OutputKind, StreamParser, decode_console_bytes
 
 A = "append"
@@ -73,18 +74,62 @@ class TestDecodeConsoleBytes:
             raw = bytes(rng.randrange(256) for _ in range(rng.randint(1, 40)))
             assert isinstance(decode_console_bytes(raw), str)
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG decode_console_bytes: CP852 (OEM code page of Polish consoles, used by "
-            "shutdown.exe/powercfg/PowerShell without UTF-8 output) is tried after CP1250. "
-            "CP852 bytes that are also valid CP1250 decode as CP1250 mojibake: "
-            "'Nie można znaleźć' -> 'Nie moľna znale«†'."
-        ),
-    )
     @pytest.mark.parametrize("text", ["Nie można znaleźć pliku", "pięć", "Ąę"])
     def test_cp852_text_that_is_also_valid_cp1250(self, text: str) -> None:
         assert decode_console_bytes(text.encode("cp852")) == text
+
+    # -- stage 3: explicit OEM/ANSI code pages, injectable
+
+    @pytest.mark.parametrize(
+        "codepages", [("cp852", "cp1250"), ("cp1250", "cp852"), ("cp437", "cp1252"), ()]
+    )
+    @pytest.mark.parametrize("encoding", ["cp852", "cp1250"])
+    @pytest.mark.parametrize("text", [*POLISH, "Nie można znaleźć pliku", "pięć", "ł", "Ś"])
+    def test_heuristic_independent_of_system_code_pages(
+        self, codepages: tuple[str, ...], encoding: str, text: str
+    ) -> None:
+        assert decode_console_bytes(text.encode(encoding), codepages=codepages) == text
+
+    def test_system_code_page_is_used_for_non_polish_text(self) -> None:
+        text = "Größe: 5 MB"  # German console (OEM 850)
+        assert decode_console_bytes(text.encode("cp850"), codepages=("cp850", "cp1252")) == text
+
+    def test_ties_go_to_the_oem_page(self) -> None:
+        raw = "é".encode("cp850")  # one letter; cp850 listed first wins over later pages
+        assert decode_console_bytes(raw, codepages=("cp850",)) == "é"
+
+    def test_unknown_or_failing_codepages_are_skipped(self) -> None:
+        raw = "żółw".encode("cp1250")
+        assert decode_console_bytes(raw, codepages=("cp-nope", "cp932")) == "żółw"
+
+    def test_default_uses_system_codepages(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen: list[bool] = []
+
+        def fake() -> tuple[str, ...]:
+            seen.append(True)
+            return ("cp850",)
+
+        monkeypatch.setattr(winget, "system_codepages", fake)
+        assert decode_console_bytes("Größe".encode("cp850")) == "Größe"
+        assert seen
+
+    def test_system_codepages_reports_oem_then_ansi(self) -> None:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        expected = list(dict.fromkeys([f"cp{kernel32.GetOEMCP()}", f"cp{kernel32.GetACP()}"]))
+        assert list(winget.system_codepages()) == expected
+
+    def test_utf8_wins_without_heuristics(self) -> None:
+        assert decode_console_bytes("żółw █".encode(), codepages=("cp852",)) == "żółw █"
+
+    def test_scores(self) -> None:
+        assert winget.decoding_score("plain") == 0
+        assert winget.decoding_score("ż") > winget.decoding_score("é") > 0
+        assert winget.decoding_score("┐│") < 0
+
+    def test_no_iso_8859_2_fallback_left(self) -> None:
+        assert not hasattr(winget, "_ENCODINGS")
 
 
 # -------------------------------------------------------- whole samples
@@ -168,14 +213,6 @@ class TestChunkInvariance:
             chunks += [piece, b""]
         assert parse_chunks(chunks) == INSTALL_EXPECTED
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG (low) StreamParser: the escape carry is capped at 4096 bytes, so an OSC "
-            "string longer than that is removed when fed at once but leaks into the log "
-            "as text when fed in small chunks (output depends on chunking)."
-        ),
-    )
     def test_osc_longer_than_carry_limit(self) -> None:
         data = b"\x1b]0;" + b"x" * 5000 + b"\x07tail\n"
         assert parse_chunks(random_chunks(data, 3, max_size=512)) == parse_whole(data)
@@ -278,14 +315,6 @@ class TestSemantics:
     def test_escape_sequences_removed(self, data: bytes) -> None:
         assert parse_whole(data) == [(A, "plain")]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG (low) _ANSI_COMPLETE: only Fe two-byte escapes (ESC 0x40-0x5F) are "
-            "removed; Fp/Fs ones such as ESC 7 / ESC 8 (save/restore cursor), ESC = / ESC > "
-            "(keypad mode) and ESC c (reset) leave their final byte in the log text."
-        ),
-    )
     @pytest.mark.parametrize("data", [b"\x1b7plain\x1b8\n", b"\x1b=plain\x1b>\n", b"\x1bcplain\n"])
     def test_two_byte_fp_fs_escapes_removed(self, data: bytes) -> None:
         assert parse_whole(data) == [(A, "plain")]
@@ -300,17 +329,36 @@ class TestSemantics:
         assert parser.feed(b"done\x1b[") == []
         assert as_tuples(parser.flush()) == [(A, "done")]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG StreamParser: an OSC that is never terminated swallows everything after "
-            "it, newlines included (_ANSI_PARTIAL_TAIL matches [^\\x07\\x1b]* up to the end), "
-            "and flush() discards the carry, so 'real line' below is silently lost."
-        ),
-    )
     def test_unterminated_osc_does_not_eat_following_lines(self) -> None:
         events = parse_whole(b"\x1b]9;4;1;50 garbage\nreal line\n")
         assert (A, "real line") in events
+
+    @pytest.mark.parametrize("seed", range(20))
+    def test_unterminated_osc_is_dropped_to_end_of_line_any_chunking(self, seed: int) -> None:
+        data = b"a\n\x1b]9;4;1;50 garbage\r\nreal line\n\x1b]0;t\x1b[31mred\x1b[0m\n"
+        expected = [(A, "a"), (A, "real line"), (A, "red")]
+        assert parse_whole(data) == expected
+        assert parse_chunks(random_chunks(data, seed, max_size=4)) == expected
+        assert parse_chunks(bytewise(data)) == expected
+
+    @pytest.mark.parametrize("terminator", [b"\x07", b"\x1b\\"])
+    def test_osc_carry_stays_small(self, terminator: bytes) -> None:
+        parser = StreamParser()
+        parser.feed(b"\x1b]0;")
+        for _ in range(100):
+            assert parser.feed(b"y" * 10_000) == []
+            assert len(parser._escape_carry) <= 2
+        assert as_tuples(parser.feed(terminator + b"tail\n")) == [(A, "tail")]
+
+    def test_long_unfinished_csi_is_not_carried_forever(self) -> None:
+        parser = StreamParser()
+        parser.feed(b"\x1b[" + b"1" * 10_000)
+        assert parser._escape_carry == b""
+
+    @pytest.mark.parametrize("final", b"0123456789:;<=>?`abcdefghijklmnopqrstuvwxyz{|}~")
+    def test_every_fp_fs_final_byte_is_removed(self, final: int) -> None:
+        assert parse_whole(b"\x1b" + bytes([final]) + b"plain\n") == [(A, "plain")]
+        assert parse_chunks([b"\x1b", bytes([final]) + b"plain\n"]) == [(A, "plain")]
 
     def test_very_long_line_without_separator(self) -> None:
         parser = StreamParser()

@@ -294,7 +294,11 @@ def test_ensure_installed_falls_back_to_msixbundle(monkeypatch, fake_stream: Fak
     fake_stream.outcomes = [ProcessOutcome(1, False), ProcessOutcome(0, False)]
     assert winget.ensure_installed().ok
     second = fake_stream.calls[1]["args"][4]
-    assert second == f"Add-AppxPackage -Path '{winget.WINGET_MSIXBUNDLE_URL}'"
+    # Contract (stage 3): every PowerShell we start forces UTF-8 output first.
+    assert second == (
+        winget.POWERSHELL_UTF8_PREAMBLE + f"Add-AppxPackage -Path '{winget.WINGET_MSIXBUNDLE_URL}'"
+    )
+    assert "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8" in second
 
 
 def test_ensure_installed_all_steps_fail(monkeypatch, fake_stream: FakeStream) -> None:

@@ -24,7 +24,7 @@ from pathlib import Path
 
 from winstaller.core import platform as plat
 from winstaller.core import winget
-from winstaller.core.catalog import Item, ItemKind, resolve_relative
+from winstaller.core.catalog import Item, ItemKind, is_relative_inside, resolve_relative
 from winstaller.core.platform import Arch
 
 
@@ -283,8 +283,7 @@ def build_remove_bloat_script(patterns: Sequence[str]) -> str:
     """
     quoted = ",".join("'" + p.replace("'", "''") + "'" for p in patterns)
     return (
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
-        "$ProgressPreference = 'SilentlyContinue'\n"
+        winget.POWERSHELL_UTF8_PREAMBLE + "\n"
         f"$patterns = @({quoted})\n"
         "foreach ($p in $patterns) {\n"
         '  $pkgs = @(Get-AppxPackage -Name "*$p*" -ErrorAction SilentlyContinue)\n'
@@ -350,6 +349,8 @@ def copy_dir_to_desktop(ctx: ActionContext) -> str:
     if not ctx.args:
         raise ActionError("Brak nazwy folderu do skopiowania.")
     name = ctx.args[0]
+    if not is_relative_inside(name):
+        raise ActionError(f"Nieprawidłowa nazwa folderu do skopiowania: {name}")
     source = ctx.app_dir / name
     if not source.is_dir():
         raise ActionError(f"Folder {name} nie istnieje w {ctx.app_dir}.")
@@ -469,7 +470,8 @@ ACTIONS: Mapping[str, ActionFunc] = {
 }
 
 
-def _as_outcome(value: ActionOutcome | str | None) -> ActionOutcome:
+def as_outcome(value: ActionOutcome | str | None) -> ActionOutcome:
+    """Normalize an :data:`ActionFunc` result (``str``/``None`` = success)."""
     if isinstance(value, ActionOutcome):
         return value
     return ActionOutcome(True, value or "Gotowe.")
@@ -519,5 +521,5 @@ def execute(item: Item, ctx: ActionContext) -> ActionOutcome:
                 func = ACTIONS[item.action]
             except KeyError:
                 raise ActionError(f"Nieznana akcja: {item.action}") from None
-            return _as_outcome(func(ctx))
+            return as_outcome(func(ctx))
     raise ActionError(f"Nieobsługiwany rodzaj pozycji: {item.kind}")

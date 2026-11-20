@@ -113,12 +113,15 @@ class TestVersions:
     @pytest.mark.parametrize(
         ("text", "key"),
         [
-            ("1.2.3", (1, 2, 3, 1, "")),
-            ("v1.2.3", (1, 2, 3, 1, "")),
-            (" 1.2.3 \n", (1, 2, 3, 1, "")),
-            ("2.0.0-dev", (2, 0, 0, 0, "dev")),
-            ("2.0.0-rc.1+build.5", (2, 0, 0, 0, "rc.1")),
-            ("1.1.8+abc", (1, 1, 8, 1, "")),
+            # Key format changed in stage 3: pre-release identifiers are compared
+            # one by one as SemVer requires ((0, n, "") numeric, (1, 0, s) text).
+            ("1.2.3", (1, 2, 3, 1, ())),
+            ("v1.2.3", (1, 2, 3, 1, ())),
+            ("V1.2.3", (1, 2, 3, 1, ())),
+            (" 1.2.3 \n", (1, 2, 3, 1, ())),
+            ("2.0.0-dev", (2, 0, 0, 0, ((1, 0, "dev"),))),
+            ("2.0.0-rc.1+build.5", (2, 0, 0, 0, ((1, 0, "rc"), (0, 1, "")))),
+            ("1.1.8+abc", (1, 1, 8, 1, ())),
         ],
     )
     def test_parse_version(self, text: str, key: tuple) -> None:
@@ -153,14 +156,6 @@ class TestVersions:
     def test_is_newer(self, candidate: str, current: str, newer: bool) -> None:
         assert is_newer(candidate, current) is newer
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG (low) updater.parse_version: pre-release identifiers are compared as one "
-            "string, so 2.0.0-rc.10 sorts below 2.0.0-rc.2 (SemVer compares numeric "
-            "identifiers numerically). Matters only if pre-releases are ever published."
-        ),
-    )
     def test_numeric_prerelease_identifiers(self) -> None:
         assert is_newer("2.0.0-rc.10", "2.0.0-rc.2")
 
@@ -245,15 +240,6 @@ class TestParseRelease:
         asset = {"name": "a", "browser_download_url": "u", "size": 1, "digest": digest}
         assert parse_release({"tag_name": "v1.0.0", "assets": [asset]}).assets[0].sha256 == expected
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=ValueError,
-        reason=(
-            "BUG (low) updater.parse_release: a non-numeric asset 'size' raises a bare "
-            "ValueError from int(), which escapes check() instead of UpdateError "
-            "(contract: format errors -> UpdateError)."
-        ),
-    )
     def test_bad_size_is_update_error(self) -> None:
         asset = {"name": "a", "browser_download_url": "u", "size": "big"}
         with pytest.raises(UpdateError):
@@ -665,17 +651,6 @@ class TestApply:
         assert not old_path_for(current).exists()
         assert new.read_bytes() == b"NEW VERSION"
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "BUG updater.apply rollback: after a failed launch the rollback first moves the "
-            "new exe back (current -> new). If that rename fails (e.g. antivirus still scans "
-            "the fresh exe) a raw OSError escapes, the original stays only as <exe>.old and the "
-            "unlaunchable new exe stays in place; cleanup_old() on next start then deletes the "
-            "original. Fix: restore with os.replace(old, current) first (it overwrites), and "
-            "wrap rollback errors in UpdateError."
-        ),
-    )
     def test_rollback_restores_original_even_if_new_file_is_locked(
         self, exe_pair, monkeypatch
     ) -> None:
@@ -719,6 +694,188 @@ class TestApply:
         assert kwargs["creationflags"] == 0x00000008 | 0x00000200
         assert kwargs["close_fds"] is True
         assert "PYINSTALLER_RESET_ENVIRONMENT" not in os.environ
+
+
+def _cross_device_error(src: Path) -> OSError:
+    # What os.replace raises on Windows across volumes: [WinError 17] ERROR_NOT_SAME_DEVICE.
+    return OSError(0, "Nie można przenieść pliku na inną stację dysków", str(src), 17)
+
+
+def _cross_volume(monkeypatch: pytest.MonkeyPatch, download_dir: Path) -> list[tuple[Path, Path]]:
+    """Make every os.replace out of ``download_dir`` fail like a move to another volume."""
+    real = os.replace
+    calls: list[tuple[Path, Path]] = []
+
+    def replace(src, dst):
+        s, d = Path(src), Path(dst)
+        calls.append((s, d))
+        if s.parent == download_dir and d.parent != download_dir:
+            raise _cross_device_error(s)
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", replace)
+    return calls
+
+
+class TestApplyStage3:
+    def test_error_helper_is_cross_device(self, tmp_path: Path) -> None:
+        assert updater._is_cross_device(_cross_device_error(tmp_path))
+        assert not updater._is_cross_device(PermissionError(13, "x"))
+
+    def test_cross_volume_download_is_copied_next_to_exe(
+        self, exe_pair, spawned, monkeypatch
+    ) -> None:
+        current, new = exe_pair
+        calls = _cross_volume(monkeypatch, new.parent)
+        assert updater.apply(new, current_exe=current, args=["--x"]) is True
+        staged = updater.staged_path_for(current)
+        assert current.read_bytes() == b"NEW VERSION"
+        assert old_path_for(current).read_bytes() == b"ORIGINAL"
+        assert not staged.exists() and not new.exists()
+        # The final swap is a same-directory rename of the staged copy.
+        assert (staged, current) in calls
+        assert spawned == [(current, ["--x"])]
+
+    def test_cross_volume_copy_failure_keeps_everything(
+        self, exe_pair, spawned, monkeypatch
+    ) -> None:
+        current, new = exe_pair
+        _cross_volume(monkeypatch, new.parent)
+
+        def broken_copy(src, dst, **kwargs):
+            Path(dst).write_bytes(b"PARTIAL")
+            raise OSError(28, "Brak miejsca na dysku")
+
+        monkeypatch.setattr(updater.shutil, "copyfile", broken_copy)
+        with pytest.raises(UpdateError, match="Nie można podmienić pliku programu"):
+            updater.apply(new, current_exe=current)
+        assert current.read_bytes() == b"ORIGINAL"
+        assert new.read_bytes() == b"NEW VERSION"
+        assert not updater.staged_path_for(current).exists()
+        assert not old_path_for(current).exists() and spawned == []
+
+    def test_cross_volume_launch_failure_restores_original(self, exe_pair, monkeypatch) -> None:
+        current, new = exe_pair
+        _cross_volume(monkeypatch, new.parent)
+        monkeypatch.setattr(updater, "_spawn", lambda exe, args: (_ for _ in ()).throw(OSError(5)))
+        with pytest.raises(UpdateError, match="Nie udało się uruchomić nowej wersji"):
+            updater.apply(new, current_exe=current)
+        assert current.read_bytes() == b"ORIGINAL"
+        assert new.read_bytes() == b"NEW VERSION"
+        assert not old_path_for(current).exists()
+
+    def test_rename_of_running_exe_fails_after_cross_volume_copy(
+        self, exe_pair, spawned, monkeypatch
+    ) -> None:
+        current, new = exe_pair
+        _cross_volume(monkeypatch, new.parent)
+        real = os.replace
+
+        def replace(src, dst):
+            if Path(src) == current:
+                raise PermissionError(13, "Odmowa dostępu", str(src))
+            return real(src, dst)
+
+        monkeypatch.setattr(os, "replace", replace)
+        with pytest.raises(UpdateError, match="Nie można zmienić nazwy"):
+            updater.apply(new, current_exe=current)
+        assert current.read_bytes() == b"ORIGINAL"
+        assert new.read_bytes() == b"NEW VERSION"
+        assert not updater.staged_path_for(current).exists()
+
+    def test_swap_failure_restores_original_and_download(
+        self, exe_pair, spawned, monkeypatch
+    ) -> None:
+        current, new = exe_pair
+        staged = updater.staged_path_for(current)
+        _fail_replace(monkeypatch, lambda s, d: s == staged and d == current)
+        with pytest.raises(UpdateError, match="Nie można podmienić pliku programu"):
+            updater.apply(new, current_exe=current)
+        assert current.read_bytes() == b"ORIGINAL"
+        assert new.read_bytes() == b"NEW VERSION"
+        assert not staged.exists() and not old_path_for(current).exists()
+
+    def test_rollback_falls_back_to_copy_when_rename_back_fails(
+        self, exe_pair, monkeypatch
+    ) -> None:
+        current, new = exe_pair
+        old = old_path_for(current)
+        monkeypatch.setattr(updater, "_spawn", lambda exe, args: (_ for _ in ()).throw(OSError(5)))
+        _fail_replace(monkeypatch, lambda s, d: s == old and d == current)
+        with pytest.raises(UpdateError, match="Nie udało się uruchomić nowej wersji"):
+            updater.apply(new, current_exe=current)
+        assert current.read_bytes() == b"ORIGINAL"
+
+    def test_rollback_failure_is_update_error_and_keeps_old(self, exe_pair, monkeypatch) -> None:
+        current, new = exe_pair
+        old = old_path_for(current)
+        monkeypatch.setattr(updater, "_spawn", lambda exe, args: (_ for _ in ()).throw(OSError(5)))
+        _fail_replace(monkeypatch, lambda s, d: s == old)
+        real_copy = updater.shutil.copyfile
+
+        def copyfile(src, dst, **kwargs):
+            if Path(src) == old:
+                raise PermissionError(13, "Plik jest używany", str(dst))
+            return real_copy(src, dst, **kwargs)
+
+        monkeypatch.setattr(updater.shutil, "copyfile", copyfile)
+        with pytest.raises(UpdateError, match="Oryginalny plik jest zachowany jako") as exc:
+            updater.apply(new, current_exe=current)
+        assert str(old) in str(exc.value)
+        assert old.read_bytes() == b"ORIGINAL"  # never lost
+
+    def test_stale_staged_file_is_replaced(self, exe_pair, spawned) -> None:
+        current, new = exe_pair
+        updater.staged_path_for(current).write_bytes(b"STALE")
+        updater.apply(new, current_exe=current)
+        assert current.read_bytes() == b"NEW VERSION"
+        assert not updater.staged_path_for(current).exists()
+
+
+class TestReleaseStage3:
+    @pytest.mark.parametrize("size", ["big", "1.5", -1, True, [1], {"n": 1}])
+    def test_bad_sizes(self, size: Any) -> None:
+        asset = {"name": "a", "browser_download_url": "u", "size": size}
+        with pytest.raises(UpdateError, match="Nieprawidłowy rozmiar"):
+            parse_release({"tag_name": "v1.0.0", "assets": [asset]})
+
+    @pytest.mark.parametrize("size", [None, "", 0, "12"])
+    def test_tolerated_sizes(self, size: Any) -> None:
+        asset = {"name": "a", "browser_download_url": "u", "size": size}
+        expected = 12 if size == "12" else 0
+        assert parse_release({"tag_name": "v1.0.0", "assets": [asset]}).assets[0].size == expected
+
+    def test_assets_not_a_list(self) -> None:
+        with pytest.raises(UpdateError):
+            parse_release({"tag_name": "v1.0.0", "assets": {"a": 1}})
+
+    def test_bad_size_from_check_is_update_error(self) -> None:
+        data = release_json()
+        data["assets"][0]["size"] = "big"
+        with pytest.raises(UpdateError):
+            updater.check(FakeSession(FakeResponse(200, data)), current="1.0.0", arch="x64")
+
+    @pytest.mark.parametrize("tag", ["V2.0.0", "v2.0.0", "2.0.0"])
+    def test_v_prefix_any_case(self, tag: str) -> None:
+        assert parse_release({"tag_name": tag}).version == "2.0.0"
+        assert is_newer(tag, "1.1.8")
+
+    @pytest.mark.parametrize(
+        ("candidate", "current"),
+        [
+            ("2.0.0-rc.10", "2.0.0-rc.2"),
+            ("2.0.0-rc.1", "2.0.0-rc"),
+            ("2.0.0-alpha.beta", "2.0.0-alpha.1"),
+            ("2.0.0-beta.2", "2.0.0-beta"),
+            ("2.0.0", "2.0.0-rc.99"),
+        ],
+    )
+    def test_semver_precedence(self, candidate: str, current: str) -> None:
+        assert is_newer(candidate, current) and not is_newer(current, candidate)
+
+    def test_empty_prerelease_identifier_rejected(self) -> None:
+        with pytest.raises(ValueError):
+            parse_version("2.0.0-rc..1")
 
 
 # --------------------------------------------------------------- cleanup

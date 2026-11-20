@@ -7,7 +7,9 @@ with that parser and delivers events on the *calling* thread.
 
 from __future__ import annotations
 
+import codecs
 import contextlib
+import functools
 import queue
 import re
 import subprocess
@@ -41,28 +43,96 @@ class OutputEvent:
     text: str
 
 
-# CSI (ESC [ ... final), OSC (ESC ] ... BEL | ESC \), nF (ESC ( B) and two-byte ESC sequences.
+# CSI (ESC [ ... final), OSC (ESC ] ... BEL | ESC \), nF (ESC ( B) and two-byte ESC
+# sequences (Fp 0x30-0x3F, Fe 0x40-0x5F, Fs 0x60-0x7E; "[" excluded: it starts CSI).
+# An OSC body stops at BEL, ESC or a line break, so an unterminated OSC is dropped up
+# to the end of its line instead of swallowing the following lines.
 _ANSI_COMPLETE = re.compile(
-    rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]+[0-~]|[@-Z\\-_])"
+    rb"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b\r\n]*(?:\x07|\x1b\\)?|[ -/]+[0-~]|[0-Z\\-~])"
 )
-# An escape sequence that started but has not finished at the end of the buffer.
-_ANSI_PARTIAL_TAIL = re.compile(rb"\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b]*\x1b?|[ -/]+)?\Z")
+# An escape sequence that started but has not finished at the end of the buffer
+# (matched from the last ESC: an OSC body never contains ESC or a line break).
+_ANSI_PARTIAL_TAIL = re.compile(rb"\x1b(?:\[[0-?]*[ -/]*|\][^\x07\x1b\r\n]*|[ -/]+)?")
 _SEPARATORS = re.compile(rb"(\r|\n)")
 _CONTROL_CHARS = re.compile(r"[\x00-\x07\x0b\x0c\x0e-\x1f\x7f]")
+#: Longest unfinished CSI/nF sequence carried to the next ``feed``. An unfinished OSC
+#: is never carried whole: its body is removed anyway, so only ``ESC ]`` is kept.
 _MAX_ESCAPE_CARRY = 4096
-_ENCODINGS = ("utf-8", "cp1250", "cp852", "iso-8859-2")
+_OSC_INTRO = b"\x1b]"
+
+#: Code pages of Polish consoles, tried after the system OEM/ANSI pages.
+_POLISH_CODEPAGES = ("cp852", "cp1250")
+_POLISH_LETTERS = frozenset("ąćęłńóśźżĄĆĘŁŃÓŚŹŻ")
 
 
-def decode_console_bytes(raw: bytes) -> str:
-    """Decode console output trying UTF-8, then Polish code pages (CP1250, CP852)."""
+@functools.cache
+def system_codepages() -> tuple[str, ...]:
+    """Codec names of the console (OEM) and ANSI code pages, in that order.
+
+    Console tools (shutdown, powercfg, winget writing to a pipe) usually emit the
+    OEM page (852 on Polish Windows); some programs use the ANSI page (1250).
+    """
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        pages = (int(kernel32.GetOEMCP()), int(kernel32.GetACP()))
+    except (AttributeError, OSError):
+        return ()
+    names: list[str] = []
+    for page in pages:
+        name = f"cp{page}"
+        try:
+            codecs.lookup(name)
+        except LookupError:
+            continue
+        if name not in names:
+            names.append(name)
+    return tuple(names)
+
+
+def decoding_score(text: str) -> int:
+    """Plausibility of decoded text: Polish letters score high, symbols and box
+    drawing characters (typical mojibake of the wrong code page) score negative."""
+    score = 0
+    for ch in text:
+        if ch < "\x80":
+            continue
+        if ch in _POLISH_LETTERS:
+            score += 3
+        elif ch.isalpha():
+            score += 1
+        else:
+            score -= 3
+    return score
+
+
+def decode_console_bytes(raw: bytes, *, codepages: Sequence[str] | None = None) -> str:
+    """Decode console output; never raises.
+
+    Valid UTF-8 is used as is. Otherwise each candidate code page (``codepages``,
+    default :func:`system_codepages`; CP852 and CP1250 are always added after them)
+    that decodes the bytes is scored with :func:`decoding_score` and the best one
+    wins; ties go to the earlier candidate (the console OEM page first).
+    """
     if not raw:
         return ""
-    for encoding in _ENCODINGS:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    candidates = system_codepages() if codepages is None else tuple(codepages)
+    best: str | None = None
+    best_score = 0
+    for encoding in dict.fromkeys((*candidates, *_POLISH_CODEPAGES)):
         try:
-            return raw.decode(encoding)
-        except UnicodeDecodeError:
+            text = raw.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
             continue
-    return raw.decode("utf-8", errors="replace")
+        score = decoding_score(text)
+        if best is None or score > best_score:
+            best, best_score = text, score
+    return best if best is not None else raw.decode("utf-8", errors="replace")
 
 
 def _apply_backspaces(text: str) -> str:
@@ -104,10 +174,15 @@ class StreamParser:
     def feed(self, chunk: bytes) -> list[OutputEvent]:
         data = self._escape_carry + chunk if self._escape_carry else chunk
         self._escape_carry = b""
-        partial = _ANSI_PARTIAL_TAIL.search(data, max(0, len(data) - _MAX_ESCAPE_CARRY))
-        if partial is not None:
-            self._escape_carry = data[partial.start() :]
-            data = data[: partial.start()]
+        last_esc = data.rfind(b"\x1b")
+        if last_esc >= 0 and _ANSI_PARTIAL_TAIL.fullmatch(data, last_esc):
+            tail = data[last_esc:]
+            if tail.startswith(_OSC_INTRO):
+                self._escape_carry = _OSC_INTRO  # the body is dropped either way
+                data = data[:last_esc]
+            elif len(tail) <= _MAX_ESCAPE_CARRY:
+                self._escape_carry = tail
+                data = data[:last_esc]
         if b"\x1b" in data:
             data = _ANSI_COMPLETE.sub(b"", data).replace(b"\x1b", b"")
         events: list[OutputEvent] = []
@@ -151,12 +226,13 @@ _EOF = object()
 _POLL_SECONDS = 0.05
 _TERMINATE_WAIT_SECONDS = 2.0
 _DRAIN_AFTER_EXIT_SECONDS = 3.0
+_FINAL_DRAIN_SECONDS = 0.2
 
 
-def _reader(pipe: IO[bytes], out: queue.Queue[object]) -> None:
+def _reader(pipe: IO[bytes], out: queue.Queue[object], stop: threading.Event) -> None:
     parser = StreamParser()
     try:
-        while True:
+        while not stop.is_set():
             try:
                 chunk = pipe.read1(65536)  # type: ignore[attr-defined]
             except (OSError, ValueError):
@@ -169,6 +245,50 @@ def _reader(pipe: IO[bytes], out: queue.Queue[object]) -> None:
         for event in parser.flush():
             out.put(event)
         out.put(_EOF)
+
+
+_THREAD_TERMINATE = 0x0001  # access right required by CancelSynchronousIo
+_ABORT_ATTEMPTS = 20
+
+
+def _cancel_synchronous_io(thread_id: int) -> None:
+    """Abort a blocking ``ReadFile`` of another thread (Win32 ``CancelSynchronousIo``)."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenThread.restype = wintypes.HANDLE
+    kernel32.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CancelSynchronousIo.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel32.OpenThread(_THREAD_TERMINATE, False, thread_id)
+    if not handle:
+        return
+    try:
+        kernel32.CancelSynchronousIo(handle)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _close_reader(reader: threading.Thread, pipe: IO[bytes], stop: threading.Event) -> None:
+    """Stop the reader thread and close the pipe.
+
+    When a grandchild still holds the pipe the reader is blocked in ``read1``; closing
+    the pipe from here would block on the reader's buffer lock, so the pending read is
+    cancelled first. If the thread cannot be stopped it is left alone (daemon) and the
+    pipe stays open rather than risking a hang.
+    """
+    stop.set()
+    for _ in range(_ABORT_ATTEMPTS):
+        if not reader.is_alive():
+            break
+        if reader.native_id is not None:
+            with contextlib.suppress(OSError, AttributeError):
+                _cancel_synchronous_io(reader.native_id)
+        reader.join(_POLL_SECONDS)
+    if not reader.is_alive():
+        with contextlib.suppress(OSError, ValueError):
+            pipe.close()
 
 
 def _stop_process(proc: subprocess.Popen[bytes]) -> None:
@@ -193,7 +313,10 @@ def stream_process(
 
     Callbacks are invoked on the calling thread. On cancellation the process is
     terminated, then killed after a grace period; returncode is then ``-1``.
-    Raises ``OSError`` (e.g. ``FileNotFoundError``) when the program cannot start.
+    A cancel that arrives after the process already exited (while remaining output
+    is delivered) does not change the outcome: the real exit code is returned and
+    the wait for EOF ends early. Raises ``OSError`` (e.g. ``FileNotFoundError``)
+    when the program cannot start.
     """
     proc = subprocess.Popen(
         list(args),
@@ -205,40 +328,70 @@ def stream_process(
     )
     assert proc.stdout is not None
     events: queue.Queue[object] = queue.Queue()
-    reader = threading.Thread(target=_reader, args=(proc.stdout, events), daemon=True)
+    stop_reading = threading.Event()
+    reader = threading.Thread(
+        target=_reader,
+        args=(proc.stdout, events, stop_reading),
+        name="winstaller-stream-reader",
+        daemon=True,
+    )
     reader.start()
 
-    cancelled = False
-    exited_at: float | None = None
-    while True:
-        try:
-            item = events.get(timeout=_POLL_SECONDS)
-        except queue.Empty:
-            item = None
-        if item is _EOF:
-            break
+    def deliver(item: object) -> None:
         if isinstance(item, OutputEvent):
             if item.kind == OutputKind.APPEND:
                 on_line(item.text)
             else:
                 on_replace_last(item.text)
-        if not cancelled and cancel_event is not None and cancel_event.is_set():
-            _stop_process(proc)
-            cancelled = True
-        # A child of the process (e.g. an installer) may inherit the pipe and keep it
-        # open after the process exits; do not wait for EOF forever in that case.
-        if proc.poll() is not None:
-            exited_at = exited_at or time.monotonic()
-            if time.monotonic() - exited_at > _DRAIN_AFTER_EXIT_SECONDS:
+
+    def cancel_requested() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
+    cancelled = False
+    exited_at: float | None = None
+    try:
+        while True:
+            try:
+                item = events.get(timeout=_POLL_SECONDS)
+            except queue.Empty:
+                item = None
+            if item is _EOF:
                 break
-    while True:
-        try:
-            proc.wait(timeout=_POLL_SECONDS)
-            break
-        except subprocess.TimeoutExpired:
-            if not cancelled and cancel_event is not None and cancel_event.is_set():
+            deliver(item)
+            exited = proc.poll() is not None
+            if not exited and not cancelled and cancel_requested():
                 _stop_process(proc)
                 cancelled = True
+                exited = True
+            if exited:
+                # A child of the process (e.g. an installer) may inherit the pipe and keep
+                # it open after the process exits; do not wait for EOF forever then.
+                exited_at = exited_at or time.monotonic()
+                if cancel_requested() or time.monotonic() - exited_at > _DRAIN_AFTER_EXIT_SECONDS:
+                    deadline = time.monotonic() + _FINAL_DRAIN_SECONDS
+                    while True:  # deliver what is already queued, waiting only briefly
+                        try:
+                            item = events.get(timeout=max(0.0, deadline - time.monotonic()))
+                        except queue.Empty:
+                            break
+                        if item is _EOF:
+                            break
+                        deliver(item)
+                    break
+        while True:
+            try:
+                proc.wait(timeout=_POLL_SECONDS)
+                break
+            except subprocess.TimeoutExpired:
+                if not cancelled and cancel_requested() and proc.poll() is None:
+                    _stop_process(proc)
+                    cancelled = True
+    except BaseException:
+        if proc.poll() is None:  # e.g. a callback raised: do not leave the process behind
+            _stop_process(proc)
+        raise
+    finally:
+        _close_reader(reader, proc.stdout, stop_reading)
     return ProcessOutcome(-1 if cancelled else proc.returncode, cancelled)
 
 
@@ -403,8 +556,23 @@ def is_available(timeout: float = 15.0) -> bool:
     return result.returncode == 0
 
 
+#: Prefix for every PowerShell script we run: output (and errors) as UTF-8, so the
+#: decoder never has to guess the console code page.
+POWERSHELL_UTF8_PREAMBLE = (
+    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; "
+    "$OutputEncoding = [System.Text.Encoding]::UTF8; "
+    "$ProgressPreference = 'SilentlyContinue'; "
+)
+
+
 def _powershell(command: str) -> list[str]:
-    return ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command]
+    return [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        POWERSHELL_UTF8_PREAMBLE + command,
+    ]
 
 
 def ensure_installed(

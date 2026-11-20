@@ -157,8 +157,9 @@ def _real_download(
 
 
 def _update_destination(asset: ReleaseAsset) -> Path:
-    """Next to the exe when possible: ``updater.apply`` moves the file with ``os.replace``,
-    which cannot cross volumes (the tool often runs from a USB stick)."""
+    """Next to the exe when possible (the tool often runs from a USB stick): the final
+    swap is then a plain rename. ``updater.apply`` also handles a download on another
+    volume (it copies it next to the exe first), so %TEMP% is a valid fallback."""
     if plat.is_frozen():
         exe_dir = Path(sys.executable).resolve().parent
         probe = exe_dir / ".winstaller-write-test"

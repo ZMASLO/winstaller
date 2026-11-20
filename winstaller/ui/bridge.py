@@ -22,7 +22,6 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 
-from winstaller.core.catalog import Item
 from winstaller.core.runner import (
     NullListener,
     RunSummary,
@@ -158,8 +157,8 @@ class _QtListener:
         self._log = log
 
     def run_started(self, tasks: Sequence[Task]) -> None:
-        # Task objects are mutated by the runner thread: hand over immutable snapshots.
-        self._signals.runStarted.emit(tuple((t.item, t.index) for t in tasks))
+        # Task objects are frozen snapshots (core contract): safe to hand over as is.
+        self._signals.runStarted.emit(tuple(tasks))
 
     def task_started(self, task: Task) -> None:
         self._signals.taskStarted.emit(task.item_id)
@@ -178,15 +177,22 @@ class _QtListener:
 
 
 class _RunThread(QThread):
-    def __init__(self, runner: TaskRunner, ids: list[str], signals: _ListenerSignals) -> None:
+    def __init__(
+        self,
+        runner: TaskRunner,
+        ids: list[str],
+        signals: _ListenerSignals,
+        cancel: threading.Event,
+    ) -> None:
         super().__init__()
         self._runner = runner
         self._ids = ids
         self._signals = signals
+        self._cancel = cancel
 
     def run(self) -> None:
         try:
-            self._runner.run(self._ids)
+            self._runner.run(self._ids, cancel_event=self._cancel)
         except Exception as exc:  # e.g. CatalogError before run_started
             self._signals.runFailed.emit(f"{type(exc).__name__}: {exc}")
 
@@ -194,7 +200,7 @@ class _RunThread(QThread):
 class RunController(QObject):
     """Owns the install-queue worker thread and exposes its lifecycle as signals.
 
-    ``runStarted(tuple[(Item, index)])``, ``taskStarted(item_id)``,
+    ``runStarted(tuple[Task, ...])``, ``taskStarted(item_id)``,
     ``taskFinished(TaskResult)``, ``runFinished(RunSummary)``, ``runFailed(str)``,
     ``stateChanged(RunState)``.
     """
@@ -213,6 +219,7 @@ class RunController(QObject):
         self._state = RunState.IDLE
         self._runner: TaskRunner | None = None
         self._thread: _RunThread | None = None
+        self._cancel = threading.Event()
         self._signals = _ListenerSignals(self)
         self._signals.runStarted.connect(self._on_run_started, QUEUED)
         self._signals.taskStarted.connect(self._on_task_started, QUEUED)
@@ -231,7 +238,7 @@ class RunController(QObject):
 
     @property
     def can_cancel(self) -> bool:
-        return self._state == RunState.RUNNING
+        return self._state in (RunState.STARTING, RunState.RUNNING)
 
     def _set_state(self, state: RunState) -> None:
         if state != self._state:
@@ -245,17 +252,19 @@ class RunController(QObject):
             self._thread.wait()  # previous run already returned; just reap the thread
             self._thread = None
         self._runner = self._services.runner_factory(_QtListener(self._signals, self._log))
-        self._thread = _RunThread(self._runner, list(item_ids), self._signals)
+        self._cancel = threading.Event()
+        self._thread = _RunThread(self._runner, list(item_ids), self._signals, self._cancel)
         self._thread.finished.connect(self._on_thread_finished, QUEUED)
         self._set_state(RunState.STARTING)
         self._thread.start()
         return True
 
     def cancel(self) -> bool:
-        """Request cancellation; only effective after ``run_started`` (core contract)."""
-        if self._state != RunState.RUNNING or self._runner is None:
+        """Request cancellation. Works from the moment ``start`` returned: the run's
+        cancel event is created here and handed to ``TaskRunner.run`` (never lost)."""
+        if not self.can_cancel:
             return False
-        self._runner.cancel()
+        self._cancel.set()
         self._set_state(RunState.STOPPING)
         self._log.info("Zatrzymywanie kolejki…")
         return True
@@ -264,8 +273,9 @@ class RunController(QObject):
         return self._thread.wait(msecs) if self._thread is not None else True
 
     @Slot(object)
-    def _on_run_started(self, tasks: tuple[tuple[Item, int], ...]) -> None:
-        self._set_state(RunState.RUNNING)
+    def _on_run_started(self, tasks: tuple[Task, ...]) -> None:
+        if self._state == RunState.STARTING:  # STOPPING (early Stop) stays
+            self._set_state(RunState.RUNNING)
         self.runStarted.emit(tasks)
 
     @Slot(object)

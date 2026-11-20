@@ -125,8 +125,8 @@ _QT_EXCLUDES = [
 ]
 
 excludes = [
-    # 1.x GUI stack and other GUI toolkits
-    "tkinter", "_tkinter", "customtkinter", "darkdetect", "PIL", "PyQt5", "PyQt6", "PySide2",
+    # other GUI toolkits
+    "tkinter", "_tkinter", "PIL", "PyQt5", "PyQt6", "PySide2",
     # dev / test tooling that must never end up in the exe
     "pytest", "_pytest", "pytestqt", "pytest_benchmark", "ruff", "PyInstaller", "setuptools",
     "pkg_resources", "distutils", "pip", "wheel",

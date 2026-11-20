@@ -328,6 +328,12 @@ class TestCopyDirToDesktop:
         with pytest.raises(ActionError, match="Brak nazwy folderu"):
             actions.copy_dir_to_desktop(self._ctx(app_dir))
 
+    @pytest.mark.parametrize("name", ["..", r"..\Windows", r"C:\Windows", r"\x", "D:x", "a/../.."])
+    def test_folder_outside_app_dir_rejected(self, desktop, app_dir, name: str) -> None:
+        with pytest.raises(ActionError, match="Nieprawidłowa nazwa folderu"):
+            actions.copy_dir_to_desktop(self._ctx(app_dir, name))
+        assert list(desktop.iterdir()) == []
+
     @pytest.mark.parametrize("make_file", [False, True])
     def test_missing_source(self, desktop, app_dir, make_file: bool) -> None:
         if make_file:
@@ -557,6 +563,12 @@ class TestLocalInstaller:
         assert outcome == ActionOutcome(True, "Zainstalowano z Setup_2.0.exe.")
         assert stream.calls == [[str(app_dir / "Setup_2.0.exe"), "/i", "/q"]]
         assert rec.lines == ["Uruchamianie instalatora Setup_2.0.exe..."]
+
+    def test_glob_picks_highest_version_numerically(self, stream, app_dir) -> None:
+        for name in ("Setup_19.9.exe", "Setup_19.10.exe", "Setup_9.99.exe"):
+            (app_dir / name).write_bytes(b"MZ")
+        outcome = actions.run_local_installer(make_ctx(app_dir)[0], "Setup_*.exe", ())
+        assert outcome.message == "Zainstalowano z Setup_19.10.exe."
 
     def test_subdirectory_path(self, stream, app_dir) -> None:
         (app_dir / "procyon").mkdir()

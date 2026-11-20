@@ -1,14 +1,15 @@
 # Winstaller — architektura
 
-Dokument ma dwie części: (A) mapa starej wersji 1.1.8 (punkt odniesienia do czasu usunięcia
-starego kodu w etapie 3) i (B) architektura 2.0 wraz z **kontraktami publicznego API `core`**,
-na których opierają się UI, testy i build.
+Dokument ma dwie części: (A) historyczna mapa wersji 1.1.8 (jej kod został usunięty z repo w
+etapie 3; jest w historii gita pod tagiem `v1.1.8`, a `tests/perf/baseline.json` zawiera jej
+pomiar) i (B) architektura 2.0 wraz z **kontraktami publicznego API `core`** i opisem UI,
+na których opierają się testy i build.
 
 ---
 
-## A. Wersja 1.1.8 (stary kod: `main.py`, `core/`, `gui/`)
+## A. Wersja 1.1.8 (historia; pliki już nie istnieją w repo)
 
-### Pliki
+### Pliki (stan z tagu `v1.1.8`)
 
 | Plik | Rola |
 |---|---|
@@ -67,8 +68,10 @@ winstaller/
     actions.py       akcje systemowe + execute(item, ctx); cienka warstwa systemowa do mockowania
     runner.py        TaskRunner, statusy, wyniki, listener, symulacja dry-run
     updater.py       check / download / apply / cleanup_old
-  ui/                PySide6 (etap 2, agent UI)
-tests/               unit / ui / perf (etap 2, agent testów)
+  ui/                PySide6, opis niżej („Interfejs (winstaller/ui)”)
+tests/               unit / ui (pytest-qt) / perf (pytest-benchmark)
+tools/               build.ps1, measure_exe.py, screenshots.py, make_icon.py
+packaging/           entry.py (wejście PyInstallera), winstaller.ico
 ```
 
 Zależności między modułami `core` (bez cykli na poziomie modułu):
@@ -94,9 +97,11 @@ catalog.toml --load_catalog()--> Catalog --(UI: wybór id)--> TaskRunner.run(ids
   potok procesu tylko wkłada zdarzenia do kolejki, oddaje je `stream_process` w wątku wołającym).
 - UI uruchamia `run()` w swoim wątku roboczym (QThread) i przekazuje zdarzenia do wątku GUI
   sygnałami (połączenia queued). Nie dotykać widgetów z listenera bezpośrednio.
-- `TaskRunner.cancel()` jest bezpieczne wątkowo (ustawia `threading.Event`). Zdarzenie jest
-  tworzone na nowo na początku `run()`, więc przycisk Stop należy włączać dopiero po
-  `run_started` (anulowanie wywołane przed startem biegu jest ignorowane).
+- Anulowanie bez wyścigu: wołający tworzy `threading.Event` i przekazuje go do
+  `run(ids, cancel_event=ev)`; ustawienie go w dowolnym momencie (także zanim wątek wszedł do
+  `run()`) anuluje ten bieg. `TaskRunner.cancel()` (bezpieczne wątkowo) ustawia zdarzenie
+  bieżącego biegu; wywołane, gdy nic nie biegnie, nic nie robi i nie „przecieka” do
+  następnego biegu.
 - `updater.check/download` też są blokujące — UI woła je w tle. `download` przyjmuje
   `cancel_event`; `progress_cb` jest wołany w wątku pobierającym.
 
@@ -111,9 +116,9 @@ Sygnatury poniżej są wiążące dla UI/testów. Wszystkie komunikaty dla użyt
 
 ```python
 APP_NAME: str = "Winstaller"
-def get_version() -> str            # "1.1.8"; literał edytuje bump_version.py (regex return "X.Y.Z")
+def get_version() -> str            # "2.0.0"; literał edytuje bump_version.py (regex return "X.Y.Z")
 VERSION: str
-def get_version_info() -> str       # "Winstaller 1.1.8"
+def get_version_info() -> str       # "Winstaller 2.0.0"
 ```
 
 ### `winstaller.core.platform`
@@ -161,7 +166,7 @@ class CategoryKind(StrEnum): INSTALL ("install"), TOOLS ("tools")
     post_launch: str | None = None         # exe do uruchomienia po udanej instalacji (%ZMIENNE%)
     confirm: str | None = None             # tekst potwierdzenia => akcja destrukcyjna
     unavailable: str | None = None         # stały powód niedostępności (np. pakiet wycofany)
-    destructive: bool  (property)          # confirm is not None
+    destructive: bool  (property)          # niepusty confirm; confirm = "" -> None
     def supports(arch: Arch) -> bool
 
 @dataclass(frozen=True) class Profile:
@@ -193,13 +198,20 @@ class Catalog:
 DEFAULT_CATALOG_PATH: Path                 # resource_path("core/catalog.toml")
 def load_catalog(path=None, *, known_actions: Collection[str] | None = None) -> Catalog
 def parse_catalog(data: Mapping, *, known_actions=None) -> Catalog   # z gotowego dict (testy)
-def resolve_relative(base: Path, rel: str) -> Path | None            # glob: ostatnie trafienie
+def resolve_relative(base: Path, rel: str) -> Path | None
+    # glob tylko w rel ([ ] w base dosłownie); przy wielu trafieniach najwyższa wersja
+    # (natural_key: 19.10 > 19.9)
+def natural_key(text: str) -> tuple             # cyfry liczbowo, tekst bez wielkości liter
+def is_relative_inside(rel: str) -> bool        # bez litery dysku, roota, UNC i ..
 ```
 
 Walidacja (`CatalogError` z czytelnym komunikatem): nieznane pola/sekcje, brak wymaganych pól,
 duplikaty id (kategorie, pozycje, profile), nieznana kategoria pozycji, nieznany rodzaj, akcja
 spoza `actions.ACTIONS`, `winget_id` wymagany dla winget, `path` dla `local_exe`, ścieżki
-bezwzględne lub z `..`, nieznana architektura, profil wskazujący nieistniejące id lub pozycję
+bezwzględne, z literą dysku (`D:setup.exe`), UNC/rootowane lub z `..` (w `path`,
+`requires_files` i w `args[0]` akcji `copy_dir_to_desktop`, która wymaga tego argumentu),
+nieznana architektura, wpis sekcji niebędący tabelą (np. `items = [3]`), profil wskazujący
+nieistniejące id, zduplikowane id w `profiles.items` / `arch_items.<arch>` lub pozycję
 nieobsługującą danej architektury w `arch_items`.
 
 ### `winstaller.core.winget`
@@ -209,7 +221,12 @@ CREATE_NO_WINDOW: int
 class OutputKind(StrEnum): APPEND = "append", REPLACE_LAST = "replace_last"
 @dataclass(frozen=True) class OutputEvent: kind: OutputKind; text: str
 
-def decode_console_bytes(raw: bytes) -> str     # utf-8 -> cp1250 -> cp852 -> iso-8859-2
+def system_codepages() -> tuple[str, ...]       # ("cp<OEM>", "cp<ANSI>") z GetOEMCP/GetACP
+def decoding_score(text: str) -> int
+def decode_console_bytes(raw: bytes, *, codepages: Sequence[str] | None = None) -> str
+    # poprawne UTF-8 -> bez zmian; inaczej kandydaci: codepages (domyślnie system_codepages())
+    # + cp852 + cp1250, wygrywa najwyższy decoding_score (remis: wcześniejszy, czyli OEM)
+POWERSHELL_UTF8_PREAMBLE: str                    # prefiks każdego skryptu PS: wyjście w UTF-8
 
 class StreamParser:                             # CZYSTY, bez I/O
     def feed(chunk: bytes) -> list[OutputEvent]
@@ -218,7 +235,10 @@ class StreamParser:                             # CZYSTY, bez I/O
 @dataclass(frozen=True) class ProcessOutcome: returncode: int; cancelled: bool
 def stream_process(args, *, on_line, on_replace_last, cancel_event=None, cwd=None) -> ProcessOutcome
     # stdout+stderr scalone, CREATE_NO_WINDOW, callbacki w wątku wołającym;
-    # anulowanie: terminate -> wait(2 s) -> kill; returncode -1; OSError gdy nie da się uruchomić
+    # anulowanie: terminate -> wait(2 s) -> kill; returncode -1; OSError gdy nie da się uruchomić;
+    # anulowanie PO zakończeniu procesu nie zmienia wyniku (prawdziwy kod), tylko skraca
+    # czekanie na EOF; po EOF/timeoucie wątek czytający jest zatrzymywany
+    # (CancelSynchronousIo), a potok zamykany; wyjątek z callbacku zatrzymuje proces
 
 SUCCESS_CODES: dict["install"|"uninstall", dict[int, str]]
 ERROR_MESSAGES: dict[int, str]
@@ -234,9 +254,13 @@ def ensure_installed(*, on_line=None, on_replace_last=None, cancel_event=None) -
 Semantyka `StreamParser`: `\n` kończy linię; `\r` wraca na początek bieżącej linii — następny
 tekst ją nadpisuje (`REPLACE_LAST`), więc `\r\n` daje zwykłą linię, a pasek postępu
 `\r##  \r### \r####\n` daje `APPEND` + kolejne `REPLACE_LAST`. Segment wysyłany jest po
-napotkaniu `\r` lub `\n` (bez zgadywania częściowych linii). Usuwane są CSI, OSC (`ESC ] ... BEL`),
-sekwencje nF i dwubajtowe ESC; sekwencja lub znak wielobajtowy przecięty granicą `feed` jest
-składany poprawnie (dekodowanie dopiero na pełnych segmentach). `\b` jest emulowany, pozostałe
+napotkaniu `\r` lub `\n` (bez zgadywania częściowych linii). Usuwane są CSI, OSC (`ESC ] ... BEL`
+albo `ESC \`; OSC bez terminatora kończy się na końcu linii lub na następnym ESC, więc nie
+zjada kolejnych linii), sekwencje nF i wszystkie dwubajtowe ESC (Fp/Fe/Fs: `ESC 7`, `ESC =`,
+`ESC c`, `ESC M` …); sekwencja lub znak wielobajtowy przecięty granicą `feed` jest składany
+poprawnie (dekodowanie dopiero na pełnych segmentach). Wynik nie zależy od podziału na
+chunki; z niedokończonego OSC przenoszone jest tylko `ESC ]` (treść i tak jest usuwana),
+niedokończone CSI/nF najwyżej 4096 bajtów. `\b` jest emulowany, pozostałe
 znaki sterujące usuwane, segmenty `strip()`-owane, puste pomijane (jak w 1.x). Koszt liniowy.
 
 Polecenia winget: `install --id <id> --exact --silent --accept-package-agreements
@@ -275,6 +299,7 @@ ACTIONS: Mapping[str, ActionFunc] = {
     "copy_self_to_desktop", "reboot_to_bios", "reboot_advanced", "battery_report",
 }
 def execute(item: Item, ctx: ActionContext) -> ActionOutcome   # realne wykonanie pozycji
+def as_outcome(value: ActionOutcome | str | None) -> ActionOutcome  # normalizacja wyniku ActionFunc
 def run_local_installer(ctx, relative: str, args) -> ActionOutcome
 def launch_after_install(ctx, path: str) -> None   # brak pliku = ostrzeżenie w logu
 BLOATWARE: tuple[str, ...]
@@ -298,6 +323,7 @@ Zachowanie akcji:
   (66 z 69), **jedno** wywołanie PowerShella (`-EncodedCommand`), log per pakiet; częściowe
   błędy usuwania = sukces z liczbą błędów w komunikacie, niezerowy kod PowerShella = błąd;
 - `copy_dir_to_desktop`: `copytree(dirs_exist_ok=True)`, błąd z właściwą nazwą folderu;
+  nazwa spoza katalogu programu (`..`, ścieżka bezwzględna) → `ActionError`;
 - `copy_self_to_desktop`: tylko frozen (`sys.executable`), w dev `ActionError`;
 - restarty: `shutdown /r /fw /t 1` i `shutdown /r /o /t 1`, kod ≠ 0 = błąd;
 - raport baterii: `powercfg /batteryreport /output <pulpit>\battery-report.html`
@@ -312,11 +338,13 @@ DaVinci na lokalny instalator nic ich nie używa.
 ```python
 class TaskStatus(StrEnum): PENDING, RUNNING, OK, FAILED, CANCELLED, SKIPPED
     finished: bool (property)
-@dataclass class Task: item: Item; index: int; status: TaskStatus = PENDING; item_id (property)
+@dataclass(frozen=True) class Task: item: Item; index: int; status: TaskStatus = PENDING
+    item_id (property)   # niemutowalna migawka: run_started -> PENDING, task_started -> RUNNING
 @dataclass(frozen=True) class TaskResult:
     item_id: str; status: TaskStatus; message: str; duration: float; artifact: Path | None = None
 @dataclass(frozen=True) class RunSummary:
-    results: tuple[TaskResult, ...]; duration: float; cancelled: bool
+    results: tuple[TaskResult, ...]; duration: float
+    cancelled: bool                # True tylko gdy któreś zadanie ma status CANCELLED
     count(status) / ok_count / failed_count / cancelled_count / skipped_count
     failed_ids: list[str]          # FAILED + CANCELLED — dla „Ponów nieudane”
 
@@ -329,13 +357,15 @@ class RunnerListener(Protocol):
     def run_finished(self, summary: RunSummary) -> None
 class NullListener                 # wszystkie metody puste; wygodna klasa bazowa
 
-Executor = Callable[[Item, ActionContext], ActionOutcome]
+Executor = Callable[[Item, ActionContext], ActionOutcome | str | None]  # str/None = sukces
 class TaskRunner:
     def __init__(self, catalog, *, dry_run=False, listener=None, dry_run_config=None,
                  executor=None, arch=None, app_dir=None, preserve_order=False)
-    def run(self, item_ids: Iterable[str]) -> RunSummary
-    def cancel(self) -> None       # thread-safe
+    def run(self, item_ids: Iterable[str], *, cancel_event: threading.Event | None = None
+            ) -> RunSummary
+    def cancel(self) -> None       # thread-safe; tylko bieg w toku
     is_running: bool (property)
+    listener_errors: list[str]     # wyjątki listenera z ostatniego biegu ("metoda: Typ: msg")
 
 ENV_DRY_RUN_FAIL = "WINSTALLER_DRY_RUN_FAIL"     # "id1,id2" lub "*"
 ENV_DRY_RUN_DELAY = "WINSTALLER_DRY_RUN_DELAY"   # sekundy na krok, 0 = natychmiast
@@ -353,8 +383,15 @@ Reguły `run()`:
   od razu `task_finished` ze statusem `SKIPPED`/`CANCELLED` **bez** `task_started` →
   na końcu `run_finished(summary)`;
 - przed każdym zadaniem runner loguje `--- <nazwa> ---`, po nim `outcome.message`;
-- wyjątek w zadaniu → `FAILED` z komunikatem, bieg trwa dalej;
-- `cancel()` przerywa bieżący proces (status `CANCELLED`) i oznacza resztę jako `CANCELLED`;
+- wyjątek w zadaniu → `FAILED` z komunikatem, bieg trwa dalej; wynik executora `str`/`None`
+  to sukces (jak `ActionFunc`), inny typ → `FAILED`;
+- wyjątek (`Exception`) rzucony przez metodę listenera **nie przerywa biegu** i nie zmienia
+  statusu zadania: jest logowany (`logging`, logger `winstaller.core.runner`) i zapisany
+  w `listener_errors`; pozostałe zdarzenia, łącznie z `run_finished`, są dostarczane.
+  `BaseException` (np. `KeyboardInterrupt`) przechodzi dalej, `is_running` jest zerowane;
+- `cancel()` / `cancel_event` przerywa bieżący proces (status `CANCELLED`) i oznacza resztę
+  jako `CANCELLED`; `RunSummary.cancelled` jest prawdą tylko, gdy coś zostało anulowane
+  (cancel po ukończeniu ostatniego zadania nie czyni biegu „anulowanym”);
 - `dry_run=True`: nic nie dotyka systemu; symulacja: kilka linii, pasek postępu przez
   `replace_last`, opóźnienia `delay` (przerywalne przez `cancel`), błąd dla `fail_ids`;
   availability nadal obowiązuje (pozycje bez plików lokalnych → `SKIPPED`);
@@ -365,7 +402,10 @@ Reguły `run()`:
 ```python
 GITHUB_REPO = "ZMASLO/winstaller"; API_LATEST_URL
 class UpdateError(Exception); class UpdateCancelled(UpdateError)
-def parse_version(text) -> tuple      # "vX.Y.Z[-pre]"; pre-release < release; ValueError
+def parse_version(text) -> VersionKey # "[vV]X.Y.Z[-pre][+build]"; porządek SemVer:
+    # pre-release < release, identyfikatory pre porównywane po kolei (rc.2 < rc.10,
+    # liczbowe < tekstowe), build ignorowany; ValueError
+    # klucz: (major, minor, patch, 0|1, ((0, n, "") | (1, 0, "txt"), ...))
 def is_newer(candidate: str, current: str) -> bool
 @dataclass(frozen=True) class ReleaseAsset: name; url; size: int; sha256: str | None
 @dataclass(frozen=True) class ReleaseInfo: tag; version; name; notes; html_url; assets
@@ -380,10 +420,12 @@ def download(asset, dest, progress_cb=None, cancel_event=None, *, session=None) 
 def apply(new_exe, *, current_exe=None, args=None, launch=True) -> bool   # True = zakończ aplikację
 def cleanup_old(exe=None, *, wait=0.0, interval=0.25) -> bool
 def old_path_for(exe: Path) -> Path    # "<exe>.old"
+def staged_path_for(exe: Path) -> Path # "<exe>.new" (kopia na tym samym woluminie co exe)
 ```
 
 `session` to dowolny obiekt z metodą `get` jak `requests.Session` (testy: atrapa).
-Błędy sieci/HTTP/formatu → `UpdateError` z polskim komunikatem (nigdy `None`).
+Błędy sieci/HTTP/formatu (także nieliczbowy/ujemny `size` assetu) → `UpdateError` z polskim
+komunikatem (nigdy `None`).
 
 ### Mechanizm aktualizacji i zgodność z 1.x
 
@@ -393,10 +435,17 @@ Błędy sieci/HTTP/formatu → `UpdateError` z polskim komunikatem (nigdy `None`
 3. `download()` — strumień do `<dest>.part` (timeouty 10/30 s), weryfikacja rozmiaru z API
    i SHA256 z pola `digest` (`sha256:<hex>`, gdy GitHub je zwraca), potem rename do `dest`;
    plik częściowy usuwany przy każdym błędzie/anulowaniu.
-4. `apply()` — `exe → exe.old` (Windows pozwala zmienić nazwę działającego obrazu),
-   `new → exe`, start nowego procesu z `PYINSTALLER_RESET_ENVIRONMENT=1` (PyInstaller ≥ 6.9:
-   nowa instancja onefile nie przejmuje katalogu `_MEI` starej), zwraca `True` → UI kończy
-   aplikację. Niepowodzenie dowolnego kroku → przywrócenie oryginału i `UpdateError`.
+4. `apply()` — (a) `new → exe.new` obok exe: rename, a gdy pobrany plik leży na innym
+   woluminie (`%TEMP%` na C:, exe na pendrive; `os.replace` daje WinError 17) — kopia;
+   (b) `exe → exe.old` (Windows pozwala zmienić nazwę działającego obrazu); (c) `exe.new → exe`
+   (zawsze atomowy rename w obrębie katalogu); (d) start nowego procesu z
+   `PYINSTALLER_RESET_ENVIRONMENT=1` (PyInstaller ≥ 6.9: nowa instancja onefile nie przejmuje
+   katalogu `_MEI` starej), zwraca `True` → UI kończy aplikację. Pobrany plik jest usuwany po
+   udanej podmianie z kopii. Niepowodzenie dowolnego kroku → **najpierw** przywrócenie
+   oryginału (`exe.old → exe`, nadpisuje nowy plik; gdy rename się nie da — kopia treści),
+   potem (best effort) oddanie pobranego pliku na miejsce i `UpdateError`. Jeśli przywrócenie
+   się nie uda, też `UpdateError` z informacją, gdzie leży oryginał (`exe.old` nigdy nie jest
+   usuwany przez `apply`). Po każdej nieudanej ścieżce oryginalny exe jest na miejscu.
    W dev (`not is_frozen()`) bez `current_exe` → `UpdateError`.
 5. `cleanup_old()` przy starcie usuwa `exe.old`; stary proces może jeszcze się zamykać, więc UI
    powinno wołać `cleanup_old(wait=10)` w tle.
@@ -409,9 +458,67 @@ sprząta `.old` przy starcie.
 ### `winstaller/__main__.py`
 
 `--smoke` (import całego core, wczytanie katalogu, wypisanie wersji/arch, kod 0; błąd → 1),
-`--version`, `--dry-run`, `--no-elevate`. Bez `--dry-run`/`--no-elevate` i bez uprawnień
-admina → `relaunch_as_admin()`. UI: `from winstaller.ui.app import run`;
-kontrakt **`run(*, dry_run: bool) -> int`** (kod wyjścia). Brak modułu UI → komunikat, kod 2.
+`--version`, `--dry-run`, `--no-elevate`, ukryte `--exit-after-show` (diagnostyka: pokaż okno,
+po pierwszej klatce wypisz `window-shown <s od startu procesu>` i zakończ; bez sprawdzania
+aktualizacji/winget — używa go `tests/perf/test_ui_perf.py`). Bez `--dry-run`/`--no-elevate`
+i bez uprawnień admina → `relaunch_as_admin()`. UI: `from winstaller.ui.app import run`;
+kontrakt **`run(*, dry_run: bool, exit_after_show: bool = False) -> int`** (kod wyjścia).
+Brak modułu UI → komunikat, kod 2.
+
+---
+
+## Interfejs (`winstaller/ui`)
+
+### Struktura
+
+```
+ui/
+  app.py           create_application() (Fusion, fonty, ikona), run(), load_theme_mode()
+  services.py      Services: wszystko spoza UI, wstrzykiwalne (testy, zrzuty, dry-run)
+  bridge.py        granica wątków: LogStore, RunController, ToolController,
+                   UpdateController, WingetController, Job (wątki tła)
+  main_window.py   MainWindow: nawigacja, banery, spinanie stron z kontrolerami
+  selection.py     SelectionModel: jedyne źródło prawdy o zaznaczeniu (blokowane w biegu)
+  icons.py         ikona rysowana w kodzie (ta sama w tools/make_icon.py -> .ico)
+  pages/           selection (Aplikacje/System), run (Przebieg), tools, log (Dziennik), about
+  widgets/         item_tile, action_bar, banner, log_view, nav, confirm_dialog, common
+  theme/           tokens (palety), qss, fonts, manager (tryb system/ciemny/jasny)
+```
+
+Strony: „Aplikacje” i „System” (kategorie `install`, kafelki, wyszukiwanie z debounce 60 ms,
+podpowiedź o trafieniach na drugiej stronie, profil, „zaznacz wszystkie” w kategorii),
+„Przebieg” (lista zadań, log na żywo, Stop / Ponów nieudane), „Narzędzia” (kategoria `tools`,
+akcje natychmiastowe z wynikiem i „Otwórz” dla `artifact`), „Dziennik” (cały log sesji,
+kopiuj/zapisz/wyczyść), „O programie” (motyw, ręczne sprawdzenie aktualizacji).
+Pozycje z `confirm` w kolejce wymagają jednego zbiorczego potwierdzenia; zamknięcie okna w
+trakcie biegu pyta, a po zgodzie zatrzymuje kolejkę i zamyka okno po `run_finished`.
+
+### Model wątków
+
+- Wątek GUI posiada wszystkie widgety. Kolejka instalacji biegnie w `QThread`
+  (`_RunThread` → `TaskRunner.run(ids, cancel_event=...)`), narzędzia, sprawdzanie i
+  pobieranie aktualizacji, winget i `cleanup_old` w wątkach-demonach (`Job`), żeby wiszące
+  wywołanie sieciowe nie blokowało zamknięcia.
+- Zdarzenia z wątków idą do GUI wyłącznie sygnałami obiektów żyjących w wątku GUI
+  (`QueuedConnection`). Listener przekazuje niemutowalne `Task`/`TaskResult`/`RunSummary`.
+- Wyjście procesów nie jest sygnalizowane per linia: trafia do `LogStore` (bufor pod blokadą),
+  opróżnianego w wątku GUI co najwyżej co `FLUSH_MS` = 40 ms jedną partią (`batch(replace,
+  lines)`), z limitem `MAX_LOG_LINES` = 5000 linii (`LogView` ma ten sam limit bloków).
+- `RunController.start()` tworzy `cancel_event` przed startem wątku, więc Stop działa od
+  pierwszej chwili (stan `STARTING` → `STOPPING`; późniejsze `run_started` go nie cofa).
+
+### `Services`
+
+`Services.create(dry_run=...)` łączy prawdziwe funkcje core (albo symulacje w dry-run).
+Pola: `catalog`, `runner_factory`, `tool_runner_factory` (`preserve_order=True`), `dry_run`,
+`arch`, `app_dir`, `version`, `check_update`, `download_update`, `apply_update` (`None` =
+pobieranie symulowane bez podmiany), `update_dest` (obok exe, gdy da się pisać; inaczej
+`%TEMP%` — `apply` radzi sobie z innym woluminem), `cleanup_old`, `winget_available`,
+`ensure_winget`, `open_path`, `open_url`, `confirm` (`None` = modalny `ConfirmDialog`),
+`auto_check_updates`, `check_winget_on_start`. Testy budują `Services` bezpośrednio z
+atrapami (`tests/ui/conftest.py`), `tools/screenshots.py` przez `Services.create(dry_run=True)`
+i `dataclasses.replace`. Ustawienia (`ui/theme`) w `QSettings` przekazanym do `MainWindow`
+(aplikacja: domyślne `QSettings`; testy: plik ini w `tmp_path`).
 
 ---
 
@@ -501,8 +608,12 @@ w `actions.py`, wpis w `ACTIONS`, pozycja z `kind = "action"`, `action = "x"`.
 - **Anulowanie** zabija proces winget (terminate → 2 s → kill, jak w 1.x); instalator
   uruchomiony przez winget może działać dalej (drzewo procesów nie jest zabijane).
 - **Pliki lokalne** względem `app_dir()` (katalog exe), nie `cwd`.
-- **Wersja** zostaje `1.1.8` w `core/version.py` w formacie zgodnym z `bump_version.py`;
-  `pyproject.toml` czyta ją dynamicznie (`winstaller.core.version.VERSION`). Bump do 2.0.0
-  w etapie 3; `bump_version.py` trzeba wtedy przestawić na `winstaller/core/version.py`.
-- **PyInstaller** (dla agenta buildu): `catalog.toml` musi trafić do
+- **Wersja** `2.0.0` w `winstaller/core/version.py` w formacie zgodnym z `bump_version.py`
+  (ten edytuje właśnie ten plik); `pyproject.toml` czyta ją dynamicznie
+  (`winstaller.core.version.VERSION`), `winstaller.spec` wpisuje ją do właściwości exe.
+- **Dekodowanie konsoli** — tam, gdzie sami uruchamiamy PowerShell, wymuszamy UTF-8
+  (`POWERSHELL_UTF8_PREAMBLE`), więc zgadywanie dotyczy tylko obcych narzędzi (shutdown,
+  powercfg, winget). CP852 i CP1250 dają się wzajemnie zdekodować bez błędu, dlatego zamiast
+  kolejności prób jest punktacja (polskie litery +3, inne litery +1, symbole/ramki −3).
+- **PyInstaller**: `catalog.toml` musi trafić do
   `_MEIPASS/winstaller/core/catalog.toml` (np. `--add-data "winstaller/core/catalog.toml;winstaller/core"`).

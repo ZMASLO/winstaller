@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from winstaller.core import winget
 from winstaller.core.winget import ProcessOutcome, stream_process
 
 _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -257,16 +258,6 @@ def test_grandchild_holding_the_pipe_does_not_hang() -> None:
         _kill_grandchild(col)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "BUG winget.stream_process: a cancel that arrives after the process already exited "
-        "(during the up-to-3 s wait for EOF while a grandchild holds the pipe, or while "
-        "queued output is still delivered) still marks the run cancelled and returns -1, so "
-        "a finished, successful winget install is reported as CANCELLED. Fix: only stop/mark "
-        "cancelled when proc.poll() is None."
-    ),
-)
 def test_cancel_after_process_exited_keeps_real_exit_code() -> None:
     cancel = threading.Event()
     timer = threading.Timer(1.0, cancel.set)  # child exits at ~0.1 s, drain lasts 3 s
@@ -277,3 +268,132 @@ def test_cancel_after_process_exited_keeps_real_exit_code() -> None:
         timer.cancel()
         _kill_grandchild(col)
     assert outcome == ProcessOutcome(0, False)
+
+
+def _reader_threads() -> list[threading.Thread]:
+    return [t for t in threading.enumerate() if t.name == "winstaller-stream-reader"]
+
+
+def test_cancel_after_exit_ends_the_eof_wait_early() -> None:
+    cancel = threading.Event()
+    timer = threading.Timer(0.5, cancel.set)
+    timer.start()
+    started = time.monotonic()
+    try:
+        outcome, col = run(_LEAVES_GRANDCHILD.format(code=7), BASE_PYTHON, cancel_event=cancel)
+    finally:
+        timer.cancel()
+        _kill_grandchild(col)
+    assert outcome == ProcessOutcome(7, False)
+    assert time.monotonic() - started < 2.5  # not the full 3 s drain
+
+
+def test_reader_thread_and_pipe_are_closed_after_eof_timeout(monkeypatch) -> None:
+    # A grandchild keeps the pipe open: after giving up on EOF the blocked reader is
+    # unblocked (CancelSynchronousIo) and the pipe closed instead of leaking both.
+    closed: list[object] = []
+    real_close = winget._close_reader
+
+    def spy(reader, pipe, stop):
+        real_close(reader, pipe, stop)
+        closed.append((reader.is_alive(), pipe.closed))
+
+    monkeypatch.setattr(winget, "_close_reader", spy)
+    outcome, col = run(_LEAVES_GRANDCHILD.format(code=0), BASE_PYTHON)
+    try:
+        assert outcome == ProcessOutcome(0, False)
+        assert closed == [(False, True)]
+        assert _reader_threads() == []
+    finally:
+        _kill_grandchild(col)
+
+
+def test_reader_closed_after_normal_eof() -> None:
+    outcome, col = run('print("x")')
+    assert outcome == ProcessOutcome(0, False) and col.lines == ["x"]
+    assert _reader_threads() == []
+
+
+def test_callback_exception_stops_the_process() -> None:
+    pids: list[int] = []
+
+    def on_line(text: str) -> None:
+        pids.append(int(text))
+        raise LookupError("ui bug")
+
+    code = "import os, time; print(os.getpid(), flush=True); time.sleep(60)"
+    started = time.monotonic()
+    with pytest.raises(LookupError):
+        stream_process(py(code, BASE_PYTHON), on_line=on_line, on_replace_last=on_line)
+    assert time.monotonic() - started < 10
+    assert not process_alive(pids[0])
+    assert _reader_threads() == []
+
+
+# ------------------------------------------------- helper edge cases (no processes)
+
+
+class _FakePipe:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_close_reader_leaves_an_unstoppable_thread_and_its_pipe_alone(monkeypatch) -> None:
+    release = threading.Event()
+    stuck = threading.Thread(target=release.wait, args=(10,), daemon=True)
+    stuck.start()
+    monkeypatch.setattr(winget, "_ABORT_ATTEMPTS", 2)
+    pipe = _FakePipe()
+    try:
+        winget._close_reader(stuck, pipe, threading.Event())  # type: ignore[arg-type]
+        assert stuck.is_alive() and not pipe.closed  # never risk a hang on close()
+    finally:
+        release.set()
+        stuck.join(5)
+
+
+def test_cancel_synchronous_io_of_unknown_thread_is_harmless() -> None:
+    winget._cancel_synchronous_io(0xFFFFFFF0)  # OpenThread fails: nothing to do
+
+
+def test_system_codepages_without_kernel32(monkeypatch) -> None:
+    import ctypes
+
+    class NoWindll:
+        def __getattr__(self, name: str):
+            raise AttributeError(name)
+
+    winget.system_codepages.cache_clear()
+    try:
+        with monkeypatch.context() as m:  # never undo() the shared guard patches
+            m.setattr(ctypes, "windll", NoWindll())
+            assert winget.system_codepages() == ()
+    finally:
+        winget.system_codepages.cache_clear()
+
+
+def test_system_codepages_skips_unknown_and_duplicate_pages(monkeypatch) -> None:
+    import ctypes
+
+    class K:
+        @staticmethod
+        def GetOEMCP() -> int:
+            return 99999  # no such codec
+
+        @staticmethod
+        def GetACP() -> int:
+            return 1250
+
+    class W:
+        kernel32 = K()
+
+    winget.system_codepages.cache_clear()
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(ctypes, "windll", W())
+            assert winget.system_codepages() == ("cp1250",)
+    finally:
+        winget.system_codepages.cache_clear()
