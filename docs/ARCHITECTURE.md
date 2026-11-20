@@ -593,12 +593,10 @@ w `actions.py`, wpis w `ACTIONS`, pozycja z `kind = "action"`, `action = "x"`.
   `path = 'DaVinci_Resolve_Studio_*_Windows.exe'` w `app_dir` i argumentami `/i /q /noreboot`
   (jak w 1.x dla instalatora z ZIP). Glob, bo nazwa pliku zawiera numer wersji; availability
   wyjaśnia brak pliku.
-- **Messenger** (`9WZDNCRF0083`) — `winget show` zwraca `0x8A150014` (pakiet nie istnieje).
-  Pozycja zostaje w katalogu z `unavailable = ...` (wyszarzona z wyjaśnieniem), bez zgadywania
-  zamiennika.
-- **„Instaluj lokalne oprogramowanie” rozdzielone** na `local-rtss` (`RTSSSetup734.exe /S`)
-  i `local-capframex` (`CapFrameXBootstrapper.exe /S`) — każda pozycja ma własną availability
-  i własny status. Procyon był już osobną pozycją.
+- **Zmiany listy względem 1.1.8 (decyzja właściciela, 2026.11.20)** — Messenger zastąpiony
+  przez Signal (`OpenWhisperSystems.Signal`), Telegram usunięty, DisplayCAL z pakietu
+  `ErkanOzgurYilmaz.DisplayCAL`, „Instaluj lokalne oprogramowanie” (RTSS i CapFrameX z plików
+  lokalnych) usunięte — oba programy instalują się przez winget.
 - **Kopiowanie BenchmarkTools (x64)** zostaje dostępne na obu architekturach (jak w 1.x);
   „BenchmarkToolsARM” tylko na arm64 i tylko w profilu przez `arch_items.arm64`.
 - **`ensure_installed`** najpierw `Add-AppxPackage -RegisterByFamilyName` (App Installer jest

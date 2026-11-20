@@ -36,7 +36,7 @@ python -m venv .venv
 Dry-run: `WINSTALLER_DRY_RUN_FAIL=id1,id2` (lub `*`) symuluje błędy, `WINSTALLER_DRY_RUN_DELAY=0`
 wyłącza opóźnienia, `WINSTALLER_FAKE_UPDATE=2.0.1` symuluje dostępną aktualizację.
 `WINSTALLER_ARCH=arm64` udaje ARM64, `WINSTALLER_APP_DIR` zmienia katalog plików lokalnych
-(BenchmarkTools, RTSSSetup734.exe, procyon\procyon-setup.exe, instalator DaVinci).
+(BenchmarkTools, procyon\procyon-setup.exe, instalator DaVinci).
 `--exit-after-show` (ukryta, diagnostyczna): pokaż okno, wypisz czas, zakończ (testy perf).
 
 ## Zasady

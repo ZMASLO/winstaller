@@ -632,8 +632,8 @@ class TestDryRun:
         statuses = {r.item_id: r.status for r in summary.results}
         assert statuses["7zip"] is TaskStatus.FAILED
         assert statuses["google-chrome"] is TaskStatus.OK
-        # Availability still applies: no local files in tmp_path, messenger withdrawn.
-        for skipped in ("messenger", "ul-procyon", "local-rtss", "copy-benchmark-tools-arm"):
+        # Availability still applies: no local files in tmp_path, arm64-only item on x64.
+        for skipped in ("ul-procyon", "davinci-resolve-studio", "copy-benchmark-tools-arm"):
             assert statuses[skipped] is TaskStatus.SKIPPED
         assert statuses["remove-bloat"] is TaskStatus.OK
         assert summary.results[[r.item_id for r in summary.results].index("7zip")].message == (

@@ -143,33 +143,30 @@ def test_tile_toggles_with_keyboard_and_arrows_move_focus(make_window, qtbot) ->
     qtbot.keyClick(first, Qt.Key.Key_Right)
     focused = QApplication.focusWidget()
     assert isinstance(focused, ItemTile) and focused is not first
-    assert focused.item.id == "telegram"
+    assert focused.item.id == "signal"
     qtbot.keyClick(focused, Qt.Key.Key_Left)
     assert QApplication.focusWidget() is first
 
 
 def test_unavailable_items_are_not_clickable(make_window, qtbot) -> None:
     w = make_window().window
-    t = tile(w, "messenger")
+    # The arm64-only copy is unavailable on x64 even though its folder exists.
+    t = tile(w, "copy-benchmark-tools-arm")
     assert not t.available and not t.interactive
     assert t.focusPolicy() == Qt.FocusPolicy.NoFocus
     assert "Niedostępne:" in t.toolTip()
     qtbot.mouseClick(t, Qt.MouseButton.LeftButton)
     qtbot.keyClick(t, Qt.Key.Key_Space)
-    assert not w.selection.is_selected("messenger")
-    # The arm64-only copy is unavailable on x64 even though its folder exists.
-    arm = tile(w, "copy-benchmark-tools-arm")
-    qtbot.mouseClick(arm, Qt.MouseButton.LeftButton)
     assert not w.selection.is_selected("copy-benchmark-tools-arm")
 
 
 def test_local_items_without_files_are_unavailable(make_window, qtbot, app_dir) -> None:
-    (app_dir / "RTSSSetup734.exe").unlink()
+    (app_dir / "procyon" / "procyon-setup.exe").unlink()
     w = make_window().window
-    t = tile(w, "local-rtss")
-    assert not t.available and "RTSSSetup734.exe" in t.toolTip()
+    t = tile(w, "ul-procyon")
+    assert not t.available and "procyon-setup.exe" in t.toolTip()
     qtbot.mouseClick(t, Qt.MouseButton.LeftButton)
-    assert not w.selection.is_selected("local-rtss")
+    assert not w.selection.is_selected("ul-procyon")
 
 
 # --------------------------------------------------------------- profiles
@@ -239,9 +236,9 @@ def test_select_all_in_category(make_window, qtbot) -> None:
 
 def test_select_all_skips_unavailable(make_window, qtbot) -> None:
     w = make_window().window
-    section = w.apps_page.sections["basic"]
+    section = w.system_page.sections["extras"]
     qtbot.mouseClick(section.toggle_button, Qt.MouseButton.LeftButton)
-    assert "messenger" not in w.selection.ids()
+    assert "copy-benchmark-tools-arm" not in w.selection.ids()
     usable = [t.item.id for t in section.tiles if t.available]
     assert section.counter.text() == f"{len(usable)} / {len(usable)}"
 

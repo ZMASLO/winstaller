@@ -13,9 +13,9 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Nowy mechanizm aktualizacji: porównanie wersji wg SemVer (bez downgrade'u), weryfikacja rozmiaru i SHA256, podmiana pliku w Pythonie bez `update.bat`, obsługa programu uruchomionego z innego dysku (np. pendrive), wycofanie przy błędzie.
 - Testy jednostkowe, testy interfejsu (pytest-qt) i wydajnościowe (porównanie z 1.1.8).
 - CI: lint, testy i build dla Windows x64 oraz ARM64; plik exe z ikoną i wersją we właściwościach.
-- Zmiana zachowania: Messenger jest niedostępny (pakiet wycofany z winget/Microsoft Store).
+- Zmiana listy programów: Signal zamiast Messengera, usunięty Telegram, DisplayCAL z pakietu `ErkanOzgurYilmaz.DisplayCAL`.
 - Zmiana zachowania: DaVinci Resolve Studio instaluje się z lokalnego instalatora `DaVinci_Resolve_Studio_*_Windows.exe` obok programu (wybierana jest najnowsza wersja).
-- Zmiana zachowania: „Instaluj lokalne oprogramowanie” rozbite na dwie pozycje: RTSS (`RTSSSetup734.exe`) i CapFrameX (`CapFrameXBootstrapper.exe`).
+- Zmiana zachowania: usunięto „Instaluj lokalne oprogramowanie” (RTSS i CapFrameX instalują się przez winget).
 - Zmiana zachowania: brak `requirements.txt` — zależności są w `pyproject.toml`.
 
 ## [1.1.8] - 2026-06-20

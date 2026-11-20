@@ -71,6 +71,11 @@ OLD_CATEGORIES: dict[str, list[str]] = {
 }
 OLD_ARM_EXTRA = ("Dodatkowe", "Kopiuj BenchmarkToolsARM na pulpit")
 OLD_SPLIT_ITEM = "Instaluj lokalne oprogramowanie"
+# Deliberate 2.0 changes to the 1.1.8 list (requested by the project owner).
+OLD_REMOVED = {"Telegram", "Messenger", OLD_SPLIT_ITEM}
+NEW_ITEMS = {"Signal": "OpenWhisperSystems.Signal"}
+CHANGED_WINGET_IDS = {"DisplayCal": "ErkanOzgurYilmaz.DisplayCAL"}
+REMOVED_IDS = ("telegram", "messenger", "local-rtss", "local-capframex")
 OLD_SPECIAL_BUTTONS = ["Restart do BIOS", "Restart zaawansowany", "Raport baterii"]
 
 OLD_BENCHMARK_PROGRAMS = [
@@ -207,7 +212,7 @@ class TestRealCatalog:
         assert destructive == {"remove-bloat", "reboot-bios", "reboot-advanced"}
 
     def test_known_special_cases(self, real: Catalog) -> None:
-        assert real.item("messenger").unavailable
+        assert not any(i.unavailable for i in real.items())
         assert real.item("copy-benchmark-tools-arm").arch == ("arm64",)
         assert real.item("copy-benchmark-tools").arch == ("x64", "arm64")
         assert real.item("steam").post_launch == r"%ProgramFiles(x86)%\Steam\Steam.exe"
@@ -224,7 +229,7 @@ class TestParityWith118:
         by_name = {i.name: i for i in real.items()}
         for category_name, names in OLD_CATEGORIES.items():
             for name in names:
-                if name == OLD_SPLIT_ITEM:
+                if name in OLD_REMOVED:
                     continue
                 assert name in by_name, name
                 assert real.category(by_name[name].category).name == category_name
@@ -232,14 +237,15 @@ class TestParityWith118:
     def test_old_items_keep_relative_order(self, real: Catalog) -> None:
         for category in real.categories(CategoryKind.INSTALL):
             new_names = [i.name for i in real.items(category.id)]
-            old = [n for n in OLD_CATEGORIES[category.name] if n != OLD_SPLIT_ITEM]
+            old = [n for n in OLD_CATEGORIES[category.name] if n not in OLD_REMOVED]
             assert [n for n in new_names if n in old] == old
 
-    def test_local_software_split_into_two_items(self, real: Catalog) -> None:
-        rtss, capframex = real.item("local-rtss"), real.item("local-capframex")
-        assert (rtss.path, rtss.args) == ("RTSSSetup734.exe", ("/S",))
-        assert (capframex.path, capframex.args) == ("CapFrameXBootstrapper.exe", ("/S",))
-        assert rtss.category == capframex.category == "extras"
+    def test_removed_and_replaced_items(self, real: Catalog) -> None:
+        for item_id in REMOVED_IDS:
+            assert real.get(item_id) is None, item_id
+        signal = real.item("signal")
+        assert (signal.category, signal.kind) == ("basic", ItemKind.WINGET)
+        assert signal.winget_id == NEW_ITEMS["Signal"]
 
     def test_arm_extra_and_special_buttons(self, real: Catalog) -> None:
         category_name, name = OLD_ARM_EXTRA
@@ -251,12 +257,14 @@ class TestParityWith118:
         old = {n for names in OLD_CATEGORIES.values() for n in names}
         old |= {OLD_ARM_EXTRA[1], *OLD_SPECIAL_BUTTONS}
         new = {i.name for i in real.items()}
-        assert new - old == {"RTSS (lokalny instalator)", "CapFrameX (lokalny bootstrapper)"}
+        assert new - old == set(NEW_ITEMS)
 
     def test_winget_ids_unchanged(self, real: Catalog) -> None:
         by_name = {i.name: i for i in real.items()}
         for name, winget_id in OLD_WINGET_IDS.items():
-            assert by_name[name].winget_id == winget_id, name
+            if name in OLD_REMOVED:
+                continue
+            assert by_name[name].winget_id == CHANGED_WINGET_IDS.get(name, winget_id), name
 
     def test_benchmark_profile_matches_old_benchmark_programs(self, real: Catalog) -> None:
         profile = real.profile("benchmark-starter")
@@ -592,15 +600,13 @@ class TestAvailability:
             "ul-procyon",
             "davinci-resolve-studio",
             "copy-benchmark-tools",
-            "local-rtss",
-            "local-capframex",
         }
         missing = {
             i.id
             for i in real.items()
             if not real.availability(i, arch="x64", base_dir=tmp_path).available
         }
-        assert missing == expected_missing | {"messenger", "copy-benchmark-tools-arm"}
+        assert missing == expected_missing | {"copy-benchmark-tools-arm"}
 
     def test_unknown_item_id(self) -> None:
         with pytest.raises(CatalogError):

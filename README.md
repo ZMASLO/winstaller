@@ -40,8 +40,6 @@ w którym leży `winstaller.exe`**. Gdy pliku brakuje, pozycja jest wyszarzona z
 |---|---|
 | `BenchmarkTools\` | Kopiuj BenchmarkTools na pulpit |
 | `BenchmarkToolsARM\` | Kopiuj BenchmarkToolsARM na pulpit (tylko ARM64) |
-| `RTSSSetup734.exe` | RTSS (lokalny instalator) |
-| `CapFrameXBootstrapper.exe` | CapFrameX (lokalny bootstrapper) |
 | `procyon\procyon-setup.exe` | UL Procyon |
 | `DaVinci_Resolve_Studio_*_Windows.exe` | DaVinci Resolve Studio (dowolna wersja pasująca do wzorca) |
 
@@ -50,8 +48,6 @@ Przykładowy układ:
 ```
 D:\Narzedzia\
   winstaller.exe
-  RTSSSetup734.exe
-  CapFrameXBootstrapper.exe
   BenchmarkTools\...
   procyon\procyon-setup.exe
 ```

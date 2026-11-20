@@ -57,21 +57,12 @@ winget_id = "Google.Chrome"
 description = "Przeglądarka internetowa Google."
 
 [[items]]
-id = "telegram"
-name = "Telegram"
+id = "signal"
+name = "Signal"
 category = "basic"
 kind = "winget"
-winget_id = "9NZTWSQNTD0S"
-description = "Komunikator Telegram (Microsoft Store)."
-
-[[items]]
-id = "messenger"
-name = "Messenger"
-category = "basic"
-kind = "winget"
-winget_id = "9WZDNCRF0083"
-description = "Komunikator Messenger (Microsoft Store)."
-unavailable = "Pakietu nie ma już w winget/Microsoft Store (aplikacja desktopowa wycofana)."
+winget_id = "OpenWhisperSystems.Signal"
+description = "Szyfrowany komunikator Signal."
 
 [[items]]
 id = "discord"
@@ -188,7 +179,7 @@ id = "displaycal"
 name = "DisplayCal"
 category = "diagnostics"
 kind = "winget"
-winget_id = "FlorianHoech.DisplayCAL"
+winget_id = "ErkanOzgurYilmaz.DisplayCAL"
 description = "Kalibracja i profilowanie monitora."
 
 [[items]]
@@ -347,24 +338,6 @@ category = "extras"
 kind = "action"
 action = "copy_self_to_desktop"
 description = "Kopiuje plik winstaller.exe na pulpit."
-
-[[items]]
-id = "local-rtss"
-name = "RTSS (lokalny instalator)"
-category = "extras"
-kind = "local_exe"
-path = "RTSSSetup734.exe"
-args = ["/S"]
-description = "Instaluje RivaTuner Statistics Server z pliku RTSSSetup734.exe obok programu."
-
-[[items]]
-id = "local-capframex"
-name = "CapFrameX (lokalny bootstrapper)"
-category = "extras"
-kind = "local_exe"
-path = "CapFrameXBootstrapper.exe"
-args = ["/S"]
-description = "Instaluje CapFrameX z pliku CapFrameXBootstrapper.exe obok programu."
 
 [[items]]
 id = "copy-benchmark-tools-arm"

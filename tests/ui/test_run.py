@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+
 from PySide6.QtCore import Qt
 
 from winstaller.core.runner import TaskStatus
@@ -111,10 +113,10 @@ def test_retry_runs_only_failed(make_window, qtbot) -> None:
 
 def test_unavailable_item_in_queue_is_skipped(make_window, qtbot, app_dir) -> None:
     h = make_window()
-    (app_dir / "RTSSSetup734.exe").unlink()  # disappears after the window was built
-    summary = start(qtbot, h.window, ["local-rtss", "7zip"])
-    assert statuses(h.window)["local-rtss"] is S.SKIPPED
-    assert summary.skipped_count == 1 and "local-rtss" not in h.executor.calls
+    (app_dir / "procyon" / "procyon-setup.exe").unlink()  # disappears after the window was built
+    summary = start(qtbot, h.window, ["ul-procyon", "7zip"])
+    assert statuses(h.window)["ul-procyon"] is S.SKIPPED
+    assert summary.skipped_count == 1 and "ul-procyon" not in h.executor.calls
 
 
 # ------------------------------------------------------------------- stop
@@ -148,9 +150,21 @@ def test_stop_during_run_cancels_the_rest(make_window, qtbot) -> None:
     assert set(w.selection.ids()) == {"steam", "epic-games", "cpu-z"}
 
 
-def test_stop_right_after_start_is_never_lost(make_window, qtbot) -> None:
+def test_stop_right_after_start_is_never_lost(make_window, qtbot, monkeypatch) -> None:
     # Stage-2 workaround (retry every 50 ms) is gone: the cancel event exists before
     # the worker thread even enters TaskRunner.run().
+    from winstaller.ui import bridge
+
+    # Hold the worker before TaskRunner.run() so Stop always wins the race; without
+    # this the instant test executor may finish both tasks before stop_run() is called.
+    stop_sent = threading.Event()
+    original_run = bridge._RunThread.run
+
+    def held_run(thread: bridge._RunThread) -> None:
+        stop_sent.wait(5)
+        original_run(thread)
+
+    monkeypatch.setattr(bridge._RunThread, "run", held_run)
     h = make_window()
     w = h.window
     w.selection.select_many(["7zip", "steam"])
@@ -158,6 +172,7 @@ def test_stop_right_after_start_is_never_lost(make_window, qtbot) -> None:
         assert w.start_install()
         assert w.run.state == RunState.STARTING
         w.stop_run()
+        stop_sent.set()
         assert w.run.state == RunState.STOPPING
         assert w.run_page.stop_button.text() == "Zatrzymywanie…"
     assert h.executor.calls == []

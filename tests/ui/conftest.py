@@ -39,8 +39,6 @@ WINDOW_SIZE = (1100, 720)
 #: Local files that make every local item of the catalog available.
 LOCAL_FILES = (
     "procyon/procyon-setup.exe",
-    "RTSSSetup734.exe",
-    "CapFrameXBootstrapper.exe",
     "DaVinci_Resolve_Studio_19.1_Windows.exe",
 )
 LOCAL_DIRS = ("BenchmarkTools", "BenchmarkToolsARM")
