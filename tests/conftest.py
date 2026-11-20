@@ -17,6 +17,11 @@ contact with the real system fail the test:
 The guard raises :class:`SystemAccessBlocked` (a ``BaseException``, so core code
 catching ``Exception``/``OSError`` cannot swallow it) and also records the
 violation, failing the test in teardown even if something did swallow it.
+
+Marker ``live`` (GPU driver vendor checks over the real network) is skipped unless
+``WINSTALLER_LIVE_TESTS=1``; only then, and only for such a test, DNS lookups of the
+vendor hosts in :data:`LIVE_HOSTS` and connections to the addresses they resolved to
+are let through. Everything else stays blocked.
 """
 
 from __future__ import annotations
@@ -74,6 +79,37 @@ _CTYPES_BLOCKED = {
 
 _LOOPBACK = {"localhost", "127.0.0.1", "::1", "0:0:0:0:0:0:0:1"}
 
+LIVE_ENV = "WINSTALLER_LIVE_TESTS"
+#: Vendor hosts a ``live`` test may reach (metadata and download servers).
+LIVE_HOSTS = frozenset(
+    {
+        "gfwsl.geforce.com",
+        "www.nvidia.com",
+        "us.download.nvidia.com",
+        "international.download.nvidia.com",
+        "www.amd.com",
+        "drivers.amd.com",
+        "dsadata.intel.com",
+        "www.intel.com",
+        "downloadmirror.intel.com",
+    }
+)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", f"live: real requests to GPU vendor sites (only with {LIVE_ENV}=1)"
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if os.environ.get(LIVE_ENV) == "1":
+        return
+    skip = pytest.mark.skip(reason=f"live test: set {LIVE_ENV}=1 to run")
+    for item in items:
+        if item.get_closest_marker("live"):
+            item.add_marker(skip)
+
 
 class SystemAccessBlocked(BaseException):
     """A unit/perf test tried to touch the real system."""
@@ -126,8 +162,12 @@ def _popen_allowed(args: object, kwargs: dict[str, object]) -> tuple[bool, str]:
 
 
 @pytest.fixture(autouse=True)
-def system_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[Guard]:
+def system_guard(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Iterator[Guard]:
     guard = Guard()
+    live = os.environ.get(LIVE_ENV) == "1" and request.node.get_closest_marker("live") is not None
+    live_addresses: set[str] = set()
 
     for name in _WINSTALLER_ENV:
         monkeypatch.delenv(name, raising=False)
@@ -171,17 +211,26 @@ def system_guard(monkeypatch: pytest.MonkeyPatch) -> Iterator[Guard]:
         return str(address)
 
     def guarded_getaddrinfo(host, *args, **kwargs):
+        name = str(host).lower().rstrip(".") if host is not None else None
+        if live and name in LIVE_HOSTS:
+            result = real_getaddrinfo(host, *args, **kwargs)
+            live_addresses.update(str(entry[4][0]) for entry in result)
+            return result
         if host is not None and str(host).lower() not in _LOOPBACK:
             raise guard.block(f"DNS lookup of {host!r}")
         return real_getaddrinfo(host, *args, **kwargs)
 
+    def _connect_allowed(address: object) -> bool:
+        host = _host_of(address).lower()
+        return host in _LOOPBACK or (live and host in live_addresses)
+
     def guarded_connect(self, address):
-        if _host_of(address).lower() not in _LOOPBACK:
+        if not _connect_allowed(address):
             raise guard.block(f"socket connect to {address!r}")
         return real_connect(self, address)
 
     def guarded_connect_ex(self, address):
-        if _host_of(address).lower() not in _LOOPBACK:
+        if not _connect_allowed(address):
             raise guard.block(f"socket connect to {address!r}")
         return real_connect_ex(self, address)
 

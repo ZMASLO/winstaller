@@ -80,6 +80,8 @@ def make_item(
         fields.setdefault("path", f"{item_id}.exe")
     if kind == ItemKind.ACTION:
         fields.setdefault("action", "theme_dark")
+    if kind == ItemKind.DRIVER:
+        fields.setdefault("vendor", "nvidia")
     fields.setdefault("name", item_id.upper())
     return Item(id=item_id, category=category, kind=kind, **fields)
 

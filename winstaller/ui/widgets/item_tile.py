@@ -27,6 +27,7 @@ KIND_TAGS: dict[ItemKind, str] = {
     ItemKind.WINGET_UNINSTALL: "[WINGET · USUŃ]",
     ItemKind.LOCAL_EXE: "[LOKALNY]",
     ItemKind.ACTION: "[AKCJA]",
+    ItemKind.DRIVER: "[STEROWNIK]",
 }
 
 

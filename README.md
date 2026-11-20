@@ -2,7 +2,8 @@
 
 Winstaller to aplikacja dla Windows, która jednym kliknięciem instaluje zestaw programów przez
 [winget](https://learn.microsoft.com/windows/package-manager/winget/) i przygotowuje platformę
-testową do benchmarków: launchery gier, narzędzia diagnostyczne, programy testowe, lokalne
+testową do benchmarków: launchery gier, narzędzia diagnostyczne, programy testowe, najnowsze
+sterowniki GPU od producenta (NVIDIA, AMD, Intel), lokalne
 instalatory, kopiowanie BenchmarkTools na pulpit, motyw systemu, usuwanie zbędnych aplikacji,
 restart do BIOS-u, raport baterii. Profil „Benchmark starter” zaznacza typowy zestaw na raz.
 
@@ -51,6 +52,36 @@ D:\Narzedzia\
   BenchmarkTools\...
   procyon\procyon-setup.exe
 ```
+
+## Sterowniki GPU
+
+Sekcja „Sterowniki GPU” na stronie „Aplikacje” (tylko Windows x64) instaluje najnowszy
+sterownik gamingowy prosto od producenta:
+
+| Pozycja | Co jest instalowane | Rozmiar |
+|---|---|---|
+| NVIDIA GeForce Game Ready | najnowszy sterownik Game Ready WHQL (z NVIDIA App) | ok. 1 GB |
+| AMD Radeon Adrenalin | najnowszy Adrenalin (WHQL lub Optional), pakiet dla wszystkich kart RDNA | ok. 1,8 GB |
+| Intel Arc | najnowszy sterownik Intel Arc / Iris Xe | ok. 0,9 GB |
+
+Jak to działa: Winstaller sprawdza na stronie producenta numer najnowszej wersji, pobiera
+instalator wyłącznie z serwera producenta (https), sprawdza rozmiar, sumę kontrolną (gdy
+producent ją podaje) i podpis cyfrowy wydawcy, a dopiero potem uruchamia instalację w trybie
+cichym. Pobrany plik jest zawsze usuwany. Komputer **nie** uruchamia się ponownie sam —
+po zakończeniu zobaczysz komunikat, że restart jest wymagany albo zalecany.
+
+Ważne:
+
+- **Program nie sprawdza, jaką masz kartę graficzną.** Wybierz sterownik swojego producenta;
+  o tym, czy sterownik pasuje do sprzętu, decyduje wyłącznie instalator producenta.
+- To zwykła instalacja (nie „czysta”): ustawienia i poprzedni sterownik są aktualizowane.
+- W trakcie instalacji obraz może na chwilę zgasnąć. Nie przerywaj instalacji sterownika —
+  przerwanie w trakcie może zostawić system w stanie pośrednim.
+- Potrzeba ok. trzykrotności rozmiaru pakietu wolnego miejsca na dysku (pobranie i
+  rozpakowanie). Instalator trafia do nowego folderu `%TEMP%\winstaller-drivers-…` i od
+  pobrania do końca instalacji jest zablokowany przed zmianą.
+- Gdy coś pójdzie nie tak, komunikat błędu zawiera link do strony pobierania producenta.
+- Pozycje nie należą do profilu „Benchmark starter”.
 
 ## Aktualizacje
 

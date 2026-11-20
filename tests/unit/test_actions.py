@@ -14,6 +14,7 @@ import pytest
 
 from tests.support import make_ctx, make_item
 from winstaller.core import actions, winget
+from winstaller.core import platform as plat
 from winstaller.core.actions import (
     ACTIONS,
     BATTERY_REPORT_NAME,
@@ -226,7 +227,7 @@ class TestRemoveBloat:
         assert len(stream.calls) == 1
         args = stream.calls[0]
         assert args[:6] == [
-            "powershell.exe",
+            plat.system32_path(plat.POWERSHELL_EXE),
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
@@ -418,7 +419,7 @@ class TestRestarts:
         run = Recorder(completed(0))
         monkeypatch.setattr(actions, "run_command", run)
         assert func(make_ctx(app_dir)[0]) == message
-        assert run.calls == [((["shutdown.exe", *args],), {"timeout": 30})]
+        assert run.calls == [(([plat.system32_path("shutdown.exe"), *args],), {"timeout": 30})]
 
     def test_nonzero_code_with_detail(self, monkeypatch, app_dir) -> None:
         stderr = "Brak obsługi oprogramowania układowego.(1)".encode()
@@ -506,7 +507,10 @@ class TestBatteryReport:
         target = desktop / BATTERY_REPORT_NAME
         assert outcome == ActionOutcome(True, f"Zapisano raport baterii: {target}", artifact=target)
         assert run.calls == [
-            ((["powercfg", "/batteryreport", "/output", str(target)],), {"timeout": 60})
+            (
+                ([plat.system32_path("powercfg.exe"), "/batteryreport", "/output", str(target)],),
+                {"timeout": 60},
+            )
         ]
 
     @pytest.mark.parametrize("desktop_code", [1, 0])

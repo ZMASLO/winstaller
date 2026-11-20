@@ -26,6 +26,11 @@ name = "Narzędzia testowe"
 description = "Oprogramowanie do benchmarków i pomiaru klatek."
 
 [[categories]]
+id = "gpu-drivers"
+name = "Sterowniki GPU"
+description = "Najnowsze sterowniki gamingowe pobierane bezpośrednio od producenta. Bez sprawdzania zgodności karty."
+
+[[categories]]
 id = "pro"
 name = "Aplikacje profesjonalne"
 description = "Montaż, grafika 3D i lokalne modele AI."
@@ -240,6 +245,40 @@ kind = "local_exe"
 path = 'procyon\procyon-setup.exe'
 args = ["/silent"]
 description = "Pakiet benchmarków UL Procyon z lokalnego instalatora."
+
+# --------------------------------------------------------------- gpu-drivers
+# The newest driver is resolved on the vendor's site at run time (core/drivers.py).
+# No graphics card detection or compatibility check (owner's decision). x64 only.
+
+[[items]]
+id = "driver-nvidia"
+name = "NVIDIA GeForce Game Ready"
+category = "gpu-drivers"
+kind = "driver"
+vendor = "nvidia"
+arch = ["x64"]
+description = "Najnowszy sterownik Game Ready pobierany ze strony NVIDIA; bez sprawdzania zgodności karty; ok. 1 GB."
+confirm = "Instalacja sterownika NVIDIA może na chwilę wyłączyć obraz i wymaga ponownego uruchomienia komputera."
+
+[[items]]
+id = "driver-amd"
+name = "AMD Radeon Adrenalin"
+category = "gpu-drivers"
+kind = "driver"
+vendor = "amd"
+arch = ["x64"]
+description = "Najnowszy sterownik Adrenalin pobierany ze strony AMD; bez sprawdzania zgodności karty; ok. 1,8 GB."
+confirm = "Instalacja sterownika AMD może na chwilę wyłączyć obraz i wymaga ponownego uruchomienia komputera."
+
+[[items]]
+id = "driver-intel"
+name = "Intel Arc"
+category = "gpu-drivers"
+kind = "driver"
+vendor = "intel"
+arch = ["x64"]
+description = "Najnowszy sterownik Intel Arc pobierany ze strony Intel; bez sprawdzania zgodności karty; ok. 0,9 GB."
+confirm = "Instalacja sterownika Intel może na chwilę wyłączyć obraz i wymaga ponownego uruchomienia komputera."
 
 # ----------------------------------------------------------------------- pro
 

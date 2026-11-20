@@ -179,6 +179,36 @@ def desktop_dir() -> Path:
     return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop"
 
 
+def windows_system_dir() -> Path:
+    """``C:\\Windows\\System32`` from ``GetSystemDirectoryW``; fallback ``%SystemRoot%``."""
+    try:
+        buffer = ctypes.create_unicode_buffer(260)
+        length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+        if 0 < length < len(buffer):
+            return Path(buffer.value)
+    except (OSError, AttributeError):
+        pass
+    root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or r"C:\Windows"
+    return Path(root) / "System32"
+
+
+def system32_path(name: str) -> str:
+    """Absolute path of a Windows program in System32 (e.g. ``shutdown.exe``,
+    ``WindowsPowerShell\\v1.0\\powershell.exe``).
+
+    Started by bare name, CreateProcess would first look in the program's own folder and
+    the current directory, so a planted ``powershell.exe`` next to winstaller.exe would
+    run elevated. Raises ``FileNotFoundError`` when the program does not exist.
+    """
+    path = windows_system_dir() / name
+    if not path.is_file():
+        raise FileNotFoundError(2, "Nie znaleziono programu systemowego", str(path))
+    return str(path)
+
+
+POWERSHELL_EXE = r"WindowsPowerShell\v1.0\powershell.exe"
+
+
 def resource_path(relative: str | os.PathLike[str]) -> Path:
     """Path of a resource bundled inside the ``winstaller`` package.
 

@@ -14,6 +14,7 @@ a projekt stosuje [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Testy jednostkowe, testy interfejsu (pytest-qt) i wydajnościowe (porównanie z 1.1.8).
 - CI: lint, testy i build dla Windows x64 oraz ARM64; plik exe z ikoną i wersją we właściwościach.
 - Zmiana listy programów: Signal zamiast Messengera, usunięty Telegram, DisplayCAL z pakietu `ErkanOzgurYilmaz.DisplayCAL`.
+- Nowa sekcja „Sterowniki GPU” (tylko x64): najnowszy sterownik NVIDIA GeForce Game Ready, AMD Radeon Adrenalin lub Intel Arc ustalany na stronie producenta (z zapasowym źródłem), pobierany tylko z serwera producenta po https, weryfikowany (rozmiar, suma SHA1/SHA512 gdy producent ją podaje, podpis cyfrowy wydawcy) i instalowany po cichu z limitem czasu, bez automatycznego restartu. Bez sprawdzania zgodności karty.
 - Zmiana zachowania: DaVinci Resolve Studio instaluje się z lokalnego instalatora `DaVinci_Resolve_Studio_*_Windows.exe` obok programu (wybierana jest najnowsza wersja).
 - Zmiana zachowania: usunięto „Instaluj lokalne oprogramowanie” (RTSS i CapFrameX instalują się przez winget).
 - Zmiana zachowania: brak `requirements.txt` — zależności są w `pyproject.toml`.

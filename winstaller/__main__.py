@@ -35,10 +35,19 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def smoke() -> int:
-    from winstaller.core import actions, catalog, platform, runner, updater, version, winget
+    from winstaller.core import (
+        actions,
+        catalog,
+        drivers,
+        platform,
+        runner,
+        updater,
+        version,
+        winget,
+    )
 
     cat = catalog.load_catalog()
-    modules = (actions, catalog, platform, runner, updater, version, winget)
+    modules = (actions, catalog, drivers, platform, runner, updater, version, winget)
     print(version.get_version_info())
     print(f"arch: {platform.get_arch()}")
     print(f"frozen: {platform.is_frozen()}")

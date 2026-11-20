@@ -283,7 +283,8 @@ def test_ensure_installed_register_step_is_enough(monkeypatch, fake_stream: Fake
     assert result.ok and result.message == "Zainstalowano winget."
     assert len(fake_stream.calls) == 1
     args = fake_stream.calls[0]["args"]
-    assert args[:4] == ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
+    powershell = winget.plat.system32_path(winget.plat.POWERSHELL_EXE)
+    assert args[:4] == [powershell, "-NoProfile", "-NonInteractive", "-Command"]
     assert "-RegisterByFamilyName" in args[4]
     assert "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe" in args[4]
     assert lines == ["Rejestrowanie App Installer (winget)..."]

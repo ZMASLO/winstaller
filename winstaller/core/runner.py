@@ -19,7 +19,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from winstaller.core import actions
+from winstaller.core import actions, drivers
 from winstaller.core import platform as plat
 from winstaller.core.actions import ActionContext, ActionError, ActionOutcome
 from winstaller.core.catalog import Catalog, Item, ItemKind
@@ -187,6 +187,8 @@ def make_dry_run_executor(config: DryRunConfig) -> Executor:
                 ctx.log(f"Uruchamianie instalatora {item.path}...")
             case ItemKind.ACTION:
                 ctx.log(f"Wykonywanie akcji {item.action}...")
+            case ItemKind.DRIVER:
+                return _simulate_driver(item, ctx, config, pause, cancelled)
         if pause():
             return cancelled
         if item.kind == ItemKind.WINGET:
@@ -209,6 +211,55 @@ def make_dry_run_executor(config: DryRunConfig) -> Executor:
         return ActionOutcome(True, "Wykonano (dry-run).")
 
     return simulate
+
+
+def _simulate_driver(
+    item: Item,
+    ctx: ActionContext,
+    config: DryRunConfig,
+    pause: Callable[[], bool],
+    cancelled: ActionOutcome,
+) -> ActionOutcome:
+    """Driver flow as the real one logs it (resolve, download, signature, install),
+    with sample data from :data:`drivers.DRY_RUN_SAMPLES`: no network, no processes."""
+    spec = drivers.VENDORS.get(item.vendor or "")
+    name = spec.name if spec else (item.vendor or "?")
+    release = drivers.dry_run_release(item.vendor)
+    ctx.log(f"Ustalanie najnowszego sterownika {name} u producenta (symulacja)...")
+    if pause():
+        return cancelled
+    ctx.log(
+        f"Najnowsza wersja: {release.version} ({release.release_date}), rozmiar "
+        f"{drivers.format_mb(release.size or 0)}. Źródło: {release.source}."
+    )
+    ctx.log(f"Pobieranie {release.url}")
+    total = release.size or 1
+    steps = max(1, config.progress_steps)
+    for step in range(1, steps + 1):
+        received = total * step // steps
+        text = drivers.format_progress(received, total, max(0.001, received / (40 * 1024**2)))
+        (ctx.log if step == 1 else ctx.replace_last)(text)
+        if pause():
+            return cancelled
+    ctx.log("Weryfikacja podpisu cyfrowego...")
+    signer = spec.signer if spec else "?"
+    ctx.log(f"Podpis cyfrowy prawidłowy: {signer} (symulacja)")
+    args = " ".join(spec.install_args) if spec else ""
+    ctx.log(f"Uruchamianie instalatora: {drivers.sanitize_filename(release.url)} {args}".rstrip())
+    ctx.log(
+        "Uwaga: przerwanie instalacji sterownika w trakcie może zostawić system w stanie pośrednim."
+    )
+    if pause():
+        return cancelled
+    if config.should_fail(item.id):
+        ctx.log("Instalator zakończył się błędem (symulacja).")
+        return ActionOutcome(False, "Symulowany błąd (dry-run).")
+    ctx.log("Instalator zakończył pracę (kod 0).")
+    return ActionOutcome(
+        True,
+        f"Zainstalowano sterownik {name} {release.version} (dry-run). "
+        "Uruchom ponownie komputer, aby dokończyć instalację.",
+    )
 
 
 # ------------------------------------------------------------------ runner

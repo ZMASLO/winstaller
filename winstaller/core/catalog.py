@@ -31,6 +31,7 @@ class ItemKind(StrEnum):
     WINGET_UNINSTALL = "winget_uninstall"  # winget uninstall <winget_id>
     LOCAL_EXE = "local_exe"  # run <path> (relative to app_dir, glob allowed) with <args>
     ACTION = "action"  # call actions.ACTIONS[<action>] with the item's <args>
+    DRIVER = "driver"  # newest GPU driver of <vendor> from the vendor's site (drivers.py)
 
 
 class CategoryKind(StrEnum):
@@ -63,6 +64,7 @@ class Item:
     post_launch: str | None = None
     confirm: str | None = None
     unavailable: str | None = None
+    vendor: str | None = None  # DRIVER: key in drivers.VENDORS ("nvidia", "amd", "intel")
 
     @property
     def destructive(self) -> bool:
@@ -261,6 +263,7 @@ _ITEM_KEYS = {
     "post_launch",
     "confirm",
     "unavailable",
+    "vendor",
 }
 _CATEGORY_KEYS = {"id", "name", "description", "kind"}
 _PROFILE_KEYS = {"id", "name", "description", "items", "arch_items"}
@@ -337,7 +340,12 @@ def _check_relative(rel: str, where: str) -> None:
         raise CatalogError(f"{where}: ścieżka {rel!r} musi być względna wobec katalogu programu.")
 
 
-def _parse_item(entry: Mapping[str, Any], index: int, known_actions: Collection[str]) -> Item:
+def _parse_item(
+    entry: Mapping[str, Any],
+    index: int,
+    known_actions: Collection[str],
+    known_vendors: Collection[str],
+) -> Item:
     where = f"Pozycja #{index + 1}"
     _check_keys(entry, _ITEM_KEYS, where)
     iid = _str(entry, "id", where)
@@ -362,6 +370,14 @@ def _parse_item(entry: Mapping[str, Any], index: int, known_actions: Collection[
             raise CatalogError(f"{where}: nieznana akcja {action!r}.")
     elif action:
         raise CatalogError(f"{where}: pole 'action' jest dozwolone tylko dla rodzaju 'action'.")
+    vendor = _str(entry, "vendor", where, required=False)
+    if kind == ItemKind.DRIVER:
+        if not vendor:
+            raise CatalogError(f"{where}: rodzaj 'driver' wymaga pola 'vendor'.")
+        if vendor not in known_vendors:
+            raise CatalogError(f"{where}: nieznany producent sterownika {vendor!r}.")
+    elif vendor is not None:
+        raise CatalogError(f"{where}: pole 'vendor' jest dozwolone tylko dla rodzaju 'driver'.")
 
     args = _str_list(entry, "args", where)
     for rel in (*_str_list(entry, "requires_files", where), *([path] if path else [])):
@@ -387,6 +403,7 @@ def _parse_item(entry: Mapping[str, Any], index: int, known_actions: Collection[
         post_launch=_str(entry, "post_launch", where, required=False),
         confirm=confirm if confirm and confirm.strip() else None,
         unavailable=_str(entry, "unavailable", where, required=False),
+        vendor=vendor,
     )
 
 
@@ -418,13 +435,20 @@ def _unique(ids: list[str], what: str) -> None:
 
 
 def parse_catalog(
-    data: Mapping[str, Any], *, known_actions: Collection[str] | None = None
+    data: Mapping[str, Any],
+    *,
+    known_actions: Collection[str] | None = None,
+    known_vendors: Collection[str] | None = None,
 ) -> Catalog:
     """Build and validate a :class:`Catalog` from already parsed TOML data."""
     if known_actions is None:
         from winstaller.core.actions import ACTIONS
 
         known_actions = ACTIONS.keys()
+    if known_vendors is None:
+        from winstaller.core.drivers import VENDORS
+
+        known_vendors = VENDORS.keys()
 
     unknown_top = set(data) - {"categories", "items", "profiles"}
     if unknown_top:
@@ -441,7 +465,9 @@ def parse_catalog(
                     f"a jest {type(entry).__name__}."
                 )
     categories = [_parse_category(e, n) for n, e in enumerate(data.get("categories", []))]
-    items = [_parse_item(e, n, known_actions) for n, e in enumerate(data.get("items", []))]
+    items = [
+        _parse_item(e, n, known_actions, known_vendors) for n, e in enumerate(data.get("items", []))
+    ]
     profiles = [_parse_profile(e, n) for n, e in enumerate(data.get("profiles", []))]
     if not categories:
         raise CatalogError("Katalog nie zawiera żadnych kategorii.")
@@ -482,6 +508,7 @@ def load_catalog(
     path: str | os.PathLike[str] | None = None,
     *,
     known_actions: Collection[str] | None = None,
+    known_vendors: Collection[str] | None = None,
 ) -> Catalog:
     """Load and validate the catalog (default: bundled ``catalog.toml``)."""
     source = Path(path) if path is not None else DEFAULT_CATALOG_PATH
@@ -492,4 +519,4 @@ def load_catalog(
         raise CatalogError(f"Nie znaleziono pliku katalogu: {source}") from None
     except tomllib.TOMLDecodeError as exc:
         raise CatalogError(f"Błąd składni w {source.name}: {exc}") from None
-    return parse_catalog(data, known_actions=known_actions)
+    return parse_catalog(data, known_actions=known_actions, known_vendors=known_vendors)

@@ -284,6 +284,20 @@ def scene_confirm(out: Path, mode: ThemeMode, prefix: str = "") -> None:
     close(w)
 
 
+def scene_drivers(out: Path, mode: ThemeMode, prefix: str = "") -> None:
+    w = make_window(base_services(), mode)
+    section = w.apps_page.sections["gpu-drivers"]
+    w.selection.select("driver-nvidia")
+    pump()
+    w.apps_page.scroll.verticalScrollBar().setValue(max(0, section.y() - 8))
+    save(w, out, f"{prefix}15_sterowniki_gpu")
+    w.start_install()
+    wait_until(lambda: w.run.last_summary is not None)
+    pump(80)
+    save(w, out, f"{prefix}16_przebieg_sterownik")
+    close(w)
+
+
 SCENES: dict[str, Callable[[Path, ThemeMode, str], None]] = {
     "apps": scene_apps,
     "run": scene_run,
@@ -292,6 +306,7 @@ SCENES: dict[str, Callable[[Path, ThemeMode, str], None]] = {
     "update": scene_update,
     "winget": scene_winget,
     "confirm": scene_confirm,
+    "drivers": scene_drivers,
 }
 LIGHT_SCENES = ("apps", "run", "about", "tools")
 

@@ -70,6 +70,11 @@ OLD_CATEGORIES: dict[str, list[str]] = {
     ],
 }
 OLD_ARM_EXTRA = ("Dodatkowe", "Kopiuj BenchmarkToolsARM na pulpit")
+# New in 2.0 (owner's request): GPU drivers resolved on the vendors' sites at run time.
+NEW_CATEGORIES = {
+    "Sterowniki GPU": ["NVIDIA GeForce Game Ready", "AMD Radeon Adrenalin", "Intel Arc"],
+}
+NEW_DRIVER_IDS = ("driver-nvidia", "driver-amd", "driver-intel")
 OLD_SPLIT_ITEM = "Instaluj lokalne oprogramowanie"
 # Deliberate 2.0 changes to the 1.1.8 list (requested by the project owner).
 OLD_REMOVED = {"Telegram", "Messenger", OLD_SPLIT_ITEM}
@@ -198,18 +203,19 @@ class TestRealCatalog:
             "launchers",
             "diagnostics",
             "testing",
+            "gpu-drivers",
             "pro",
             "system",
             "extras",
             "tools",
         ]
         assert [c.id for c in real.categories(CategoryKind.TOOLS)] == ["tools"]
-        assert [c.order for c in real.categories()] == list(range(8))
+        assert [c.order for c in real.categories()] == list(range(9))
 
     def test_tools_and_destructive_items(self, real: Catalog) -> None:
         assert [i.id for i in real.tools()] == ["reboot-bios", "reboot-advanced", "battery-report"]
         destructive = {i.id for i in real.items() if i.destructive}
-        assert destructive == {"remove-bloat", "reboot-bios", "reboot-advanced"}
+        assert destructive == {"remove-bloat", "reboot-bios", "reboot-advanced", *NEW_DRIVER_IDS}
 
     def test_known_special_cases(self, real: Catalog) -> None:
         assert not any(i.unavailable for i in real.items())
@@ -223,7 +229,7 @@ class TestRealCatalog:
 class TestParityWith118:
     def test_category_names_and_order(self, real: Catalog) -> None:
         names = [c.name for c in real.categories(CategoryKind.INSTALL)]
-        assert names == list(OLD_CATEGORIES)
+        assert [n for n in names if n not in NEW_CATEGORIES] == list(OLD_CATEGORIES)
 
     def test_every_old_item_exists_in_same_category(self, real: Catalog) -> None:
         by_name = {i.name: i for i in real.items()}
@@ -236,6 +242,8 @@ class TestParityWith118:
 
     def test_old_items_keep_relative_order(self, real: Catalog) -> None:
         for category in real.categories(CategoryKind.INSTALL):
+            if category.name in NEW_CATEGORIES:
+                continue
             new_names = [i.name for i in real.items(category.id)]
             old = [n for n in OLD_CATEGORIES[category.name] if n not in OLD_REMOVED]
             assert [n for n in new_names if n in old] == old
@@ -257,7 +265,8 @@ class TestParityWith118:
         old = {n for names in OLD_CATEGORIES.values() for n in names}
         old |= {OLD_ARM_EXTRA[1], *OLD_SPECIAL_BUTTONS}
         new = {i.name for i in real.items()}
-        assert new - old == set(NEW_ITEMS)
+        new_drivers = {n for names in NEW_CATEGORIES.values() for n in names}
+        assert new - old == set(NEW_ITEMS) | new_drivers
 
     def test_winget_ids_unchanged(self, real: Catalog) -> None:
         by_name = {i.name: i for i in real.items()}

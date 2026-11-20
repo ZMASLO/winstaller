@@ -9,7 +9,8 @@ Pełna mapa projektu, kontrakty API `core`, opis UI i format katalogu: **docs/AR
 ## Układ
 
 - `winstaller/core/` — logika bez UI: `catalog.toml` + `catalog.py`, `winget.py`, `actions.py`,
-  `runner.py`, `updater.py`, `platform.py`, `version.py`
+  `drivers.py` (sterowniki GPU od producentów), `runner.py`, `updater.py`, `platform.py`,
+  `version.py`
 - `winstaller/ui/` — interfejs PySide6 (wejście: `winstaller.ui.app.run(*, dry_run) -> int`);
   wszystko z zewnątrz (runnery, aktualizacje, winget, potwierdzenia, otwieranie plików)
   wstrzykiwane przez `ui/services.py: Services`
@@ -50,6 +51,10 @@ wyłącza opóźnienia, `WINSTALLER_FAKE_UPDATE=2.0.1` symuluje dostępną aktua
   usuwania appx w testach ani przy pracy nad kodem. Używaj `--dry-run`, `executor=` w
   `TaskRunner` albo `monkeypatch` warstwy systemowej w `actions.py`. Dozwolone polecenia
   tylko do odczytu, np. `winget search`, `winget show`, `winget error`.
+- Sterowniki GPU (`core/drivers.py`): nigdy nie uruchamiaj instalatorów sterowników i nie
+  pobieraj ich (0,9–1,8 GB) — ani w testach, ani ręcznie. W testach sieć przez atrapę
+  `session`, procesy przez `monkeypatch` `drivers.run_process` / `drivers.verify_signature`.
+  Ręcznie wolno tylko zapytania tylko do odczytu (lookup, HEAD, `Range: bytes=0-1023`).
 - Bezpiecznik `tests/conftest.py` (autouse) blokuje procesy, rejestr, sieć, ShellExecute itp.
   we wszystkich testach — nie osłabiaj go. Testy UI dodatkowo (`tests/ui/conftest.py`)
   blokują `QDesktopServices.openUrl`, modalne dialogi i domyślne `QSettings` w rejestrze.

@@ -22,8 +22,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from winstaller.core import drivers, winget
 from winstaller.core import platform as plat
-from winstaller.core import winget
 from winstaller.core.catalog import Item, ItemKind, is_relative_inside, resolve_relative
 from winstaller.core.platform import Arch
 
@@ -148,7 +148,7 @@ def _decode(raw: bytes | None) -> str:
 def _powershell_encoded(script: str) -> list[str]:
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     return [
-        "powershell.exe",
+        plat.system32_path(plat.POWERSHELL_EXE),
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy",
@@ -385,7 +385,7 @@ def copy_self_to_desktop(ctx: ActionContext) -> str:
 
 def _shutdown(args: list[str], what: str) -> str:
     try:
-        result = run_command(["shutdown.exe", *args], timeout=30)
+        result = run_command([plat.system32_path("shutdown.exe"), *args], timeout=30)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ActionError(f"Nie udało się uruchomić polecenia shutdown: {exc}") from exc
     if result.returncode != 0:
@@ -414,7 +414,10 @@ def battery_report(ctx: ActionContext) -> ActionOutcome:
     for directory in (desktop_dir(), ctx.app_dir):
         target = directory / BATTERY_REPORT_NAME
         try:
-            result = run_command(["powercfg", "/batteryreport", "/output", str(target)], timeout=60)
+            result = run_command(
+                [plat.system32_path("powercfg.exe"), "/batteryreport", "/output", str(target)],
+                timeout=60,
+            )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ActionError(f"Nie udało się uruchomić powercfg: {exc}") from exc
         if result.returncode == 0 and target.exists():
@@ -454,6 +457,24 @@ def launch_after_install(ctx: ActionContext, path: str) -> None:
         ctx.log(f"Uruchomiono {exe.name}.")
     except OSError as exc:
         ctx.log(f"Ostrzeżenie: nie udało się uruchomić {exe.name}: {exc}")
+
+
+# ------------------------------------------------------------ GPU drivers
+
+
+def install_driver(ctx: ActionContext, vendor_id: str | None) -> ActionOutcome:
+    """Newest GPU driver of ``vendor_id`` from the vendor (see core/drivers.py)."""
+    try:
+        result = drivers.install_latest(
+            vendor_id or "",
+            log=ctx.log,
+            replace_last=ctx.replace_last,
+            cancel_event=ctx.cancel_event,
+            app_dir=ctx.app_dir,
+        )
+    except drivers.DriverError as exc:
+        raise ActionError(exc.user_message()) from exc
+    return ActionOutcome(result.ok, result.message, cancelled=result.cancelled)
 
 
 # ------------------------------------------------------------- registry
@@ -522,4 +543,6 @@ def execute(item: Item, ctx: ActionContext) -> ActionOutcome:
             except KeyError:
                 raise ActionError(f"Nieznana akcja: {item.action}") from None
             return as_outcome(func(ctx))
+        case ItemKind.DRIVER:
+            return install_driver(ctx, item.vendor)
     raise ActionError(f"Nieobsługiwany rodzaj pozycji: {item.kind}")

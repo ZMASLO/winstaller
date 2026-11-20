@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import IO, Literal
 
+from winstaller.core import platform as plat
+
 LineCallback = Callable[[str], None]
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
@@ -308,6 +310,8 @@ def stream_process(
     on_replace_last: LineCallback,
     cancel_event: threading.Event | None = None,
     cwd: str | None = None,
+    on_start: Callable[[subprocess.Popen[bytes]], None] | None = None,
+    creationflags: int = 0,
 ) -> ProcessOutcome:
     """Run ``args`` with merged stdout/stderr, streaming parsed output.
 
@@ -316,7 +320,10 @@ def stream_process(
     A cancel that arrives after the process already exited (while remaining output
     is delivered) does not change the outcome: the real exit code is returned and
     the wait for EOF ends early. Raises ``OSError`` (e.g. ``FileNotFoundError``)
-    when the program cannot start.
+    when the program cannot start. ``on_start(proc)`` is called right after the
+    process starts (e.g. to put it in a Job Object); if it raises, the process is
+    stopped and the exception propagates. ``creationflags`` are added to
+    ``CREATE_NO_WINDOW`` (e.g. ``CREATE_SUSPENDED``; then ``on_start`` must resume it).
     """
     proc = subprocess.Popen(
         list(args),
@@ -324,9 +331,17 @@ def stream_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         cwd=cwd,
-        creationflags=CREATE_NO_WINDOW,
+        creationflags=CREATE_NO_WINDOW | creationflags,
     )
     assert proc.stdout is not None
+    if on_start is not None:
+        try:
+            on_start(proc)
+        except BaseException:
+            _stop_process(proc)
+            with contextlib.suppress(OSError, ValueError):
+                proc.stdout.close()
+            raise
     events: queue.Queue[object] = queue.Queue()
     stop_reading = threading.Event()
     reader = threading.Thread(
@@ -566,8 +581,10 @@ POWERSHELL_UTF8_PREAMBLE = (
 
 
 def _powershell(command: str) -> list[str]:
+    """PowerShell by absolute System32 path (``FileNotFoundError`` when missing). winget
+    itself stays a bare name: it is an App Execution Alias in the user's profile."""
     return [
-        "powershell.exe",
+        plat.system32_path(plat.POWERSHELL_EXE),
         "-NoProfile",
         "-NonInteractive",
         "-Command",
