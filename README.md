@@ -2,9 +2,9 @@
 
 Winstaller to aplikacja dla Windows, która jednym kliknięciem instaluje zestaw programów przez
 [winget](https://learn.microsoft.com/windows/package-manager/winget/) i przygotowuje platformę
-testową do benchmarków: launchery gier, narzędzia diagnostyczne, programy testowe, najnowsze
-sterowniki GPU od producenta (NVIDIA, AMD, Intel), lokalne
-instalatory, kopiowanie BenchmarkTools na pulpit, motyw systemu, usuwanie zbędnych aplikacji,
+testową do benchmarków: aktualizacje Windows i aplikacji Microsoft Store, launchery gier,
+narzędzia diagnostyczne, programy testowe, najnowsze sterowniki GPU od producenta (NVIDIA, AMD,
+Intel), lokalne instalatory, kopiowanie BenchmarkTools na pulpit, motyw systemu, usuwanie zbędnych aplikacji,
 restart do BIOS-u, raport baterii. Profil „Benchmark starter” zaznacza typowy zestaw na raz.
 
 ## Pobieranie
@@ -23,7 +23,8 @@ Najnowsza wersja jest na stronie [Releases](https://github.com/ZMASLO/winstaller
 
 - Windows 10/11 x64 albo Windows 11 ARM64,
 - konto z uprawnieniami administratora (aplikacja sama poprosi o nie przez UAC),
-- winget (App Installer); jeśli go brakuje, Winstaller spróbuje go doinstalować,
+- winget (App Installer); jeśli go brakuje, Winstaller pokaże baner z przyciskiem
+  „Zainstaluj winget”,
 - połączenie z internetem.
 
 ## Uruchomienie
@@ -73,7 +74,8 @@ Ważne:
     („Wyszukiwanie aktualizacji”, „Pobieranie 2 z 5”, „Instalacja 5 z 6”), tytuł bieżącej
     aktualizacji, czas trwania bieżącego kroku, lista aktualizacji ze statusem każdej, po
     zakończeniu wynik z liczbami i „wymagany restart”, przycisk „Otwórz log”;
-  - znacznik przy „Przebieg” w menu (`WU 2/5`, potem `WU OK` albo `WU BŁ.`) i baner u góry
+  - znacznik przy „Przebieg” w menu (`WU 2/5`, potem `WU OK`, `WU BŁ.` albo `WU ?`, gdy stanu
+    nie da się odczytać) i baner u góry
     okna po zakończeniu („Pokaż”, „Otwórz log”, „Ukryj”);
   - instalacja trwa dalej po zamknięciu Winstallera; po ponownym otwarciu program pokazuje
     ją znowu (także zakończoną od ostatniego uruchomienia komputera, dopóki nie klikniesz
@@ -128,7 +130,7 @@ Ważne:
 ## Aktualizacje
 
 Winstaller sprawdza na GitHub Releases, czy jest nowsza wersja, i pobiera plik
-dla swojej architektury, weryfikuje rozmiar i sumę SHA256, podmienia exe (także uruchomiony
+dla swojej architektury, weryfikuje rozmiar i sumę SHA256 (gdy GitHub ją podaje), podmienia exe (także uruchomiony
 z pendrive'a) i uruchamia się ponownie; przy błędzie przywraca poprzednią wersję. Nigdy nie instaluje starszej wersji. Wersje 1.1.x aktualizują się do 2.x tą samą drogą.
 
 ## Dla deweloperów
