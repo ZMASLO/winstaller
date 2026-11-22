@@ -1,0 +1,13 @@
+{
+    "winstaller":  "wu-install",
+    "state":  "running",
+    "pid":  9968,
+    "started":  "2026-11-22T15:55:34.3243327+01:00",
+    "finished":  null,
+    "rebootRequired":  false,
+    "exitCode":  null,
+    "error":  null,
+    "updates":  [
+
+                ]
+}

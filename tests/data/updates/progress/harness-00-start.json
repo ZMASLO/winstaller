@@ -1,0 +1,22 @@
+{
+    "winstaller":  "wu-install",
+    "state":  "running",
+    "phase":  "searching",
+    "pid":  25272,
+    "started":  "2026-11-22T16:50:37.6687261+01:00",
+    "finished":  null,
+    "phaseStarted":  "2026-11-22T16:50:37.6697260+01:00",
+    "total":  0,
+    "current":  0,
+    "downloadTotal":  0,
+    "downloadCurrent":  0,
+    "currentTitle":  null,
+    "rebootRequired":  false,
+    "exitCode":  null,
+    "error":  null,
+    "log":  "C:\\Temp\\winstaller-test\\h.log",
+    "updates":  [
+
+                ],
+    "updated":  "2026-11-22T16:50:37.6757255+01:00"
+}

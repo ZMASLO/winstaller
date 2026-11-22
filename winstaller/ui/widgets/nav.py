@@ -25,6 +25,8 @@ class NavButton(QAbstractButton):
         self._theme = theme
         self._badge = ""
         self._badge_tone = "muted"
+        self._extra = ""  # second badge, left of the first (e.g. "WU 2/5" on Przebieg)
+        self._extra_tone = "muted"
         self._hover = False
         self.setText(text)
         self.setObjectName(f"nav_{page_id}")
@@ -42,6 +44,23 @@ class NavButton(QAbstractButton):
     def set_badge(self, text: str, tone: str = "muted") -> None:
         if (text, tone) != (self._badge, self._badge_tone):
             self._badge, self._badge_tone = text, tone
+            self.update()
+
+    @property
+    def extra_badge(self) -> str:
+        return self._extra
+
+    @property
+    def extra_badge_tone(self) -> str:
+        return self._extra_tone
+
+    @property
+    def badge_tone(self) -> str:
+        return self._badge_tone
+
+    def set_extra_badge(self, text: str, tone: str = "muted") -> None:
+        if (text, tone) != (self._extra, self._extra_tone):
+            self._extra, self._extra_tone = text, tone
             self.update()
 
     def sizeHint(self) -> QSize:
@@ -78,18 +97,19 @@ class NavButton(QAbstractButton):
         p.setFont(text_font)
         p.setPen(QColor(pal.text if active or self._hover else pal.muted))
         right = r.width() - 18
-        if self._badge:
+        for text, tone in ((self._badge, self._badge_tone), (self._extra, self._extra_tone)):
+            if not text:
+                continue
             fm = QFontMetrics(num_font)
-            w = fm.horizontalAdvance(self._badge) + 4
-            color = {"accent": pal.accent_fg, "error": pal.error_fg}.get(
-                self._badge_tone, pal.muted
+            w = fm.horizontalAdvance(text) + 4
+            color = {"accent": pal.accent_fg, "error": pal.error_fg, "text": pal.text}.get(
+                tone, pal.muted
             )
             p.setFont(num_font)
             p.setPen(QColor(color))
-            p.drawText(
-                QRect(right - w, 0, w, r.height()), mid | Qt.AlignmentFlag.AlignRight, self._badge
-            )
-            right -= w + 8
+            p.drawText(QRect(right - w, 0, w, r.height()), mid | Qt.AlignmentFlag.AlignRight, text)
+            right -= w + 6
+        if self._badge or self._extra:
             p.setFont(text_font)
             p.setPen(QColor(pal.text if active or self._hover else pal.muted))
         p.drawText(QRect(56, 0, right - 56, r.height()), mid, self.text())
@@ -160,3 +180,8 @@ class NavRail(QWidget):
         btn = self.buttons.get(page_id)
         if btn is not None:
             btn.set_badge(text, tone)
+
+    def set_extra_badge(self, page_id: str, text: str, tone: str = "muted") -> None:
+        btn = self.buttons.get(page_id)
+        if btn is not None:
+            btn.set_extra_badge(text, tone)

@@ -121,7 +121,7 @@ def test_full_log_and_message(fake, tmp_path) -> None:
     assert outcome.ok and not outcome.cancelled and outcome.artifact == LOG
     assert outcome.message == (
         "Znaleziono 5 aktualizacji (w tym 5 opcjonalnych); instalacja uruchomiona w tle. "
-        f"Postęp: Ustawienia → Windows Update lub log {LOG}. Po zakończeniu może być "
+        f"Postęp: zakładka Przebieg (blok „W tle”) i log {LOG}. Po zakończeniu może być "
         "wymagany restart."
     )
     assert fake.starts == [([u.id for u in fake.scan.updates], {})]

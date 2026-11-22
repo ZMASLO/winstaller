@@ -1,0 +1,29 @@
+{
+    "winstaller":  "wu-install",
+    "state":  "running",
+    "phase":  "searching",
+    "pid":  25272,
+    "started":  "2026-11-22T16:50:37.6687261+01:00",
+    "finished":  null,
+    "phaseStarted":  "2026-11-22T16:50:37.6697260+01:00",
+    "total":  1,
+    "current":  0,
+    "downloadTotal":  0,
+    "downloadCurrent":  0,
+    "currentTitle":  null,
+    "rebootRequired":  false,
+    "exitCode":  null,
+    "error":  null,
+    "log":  "C:\\Temp\\winstaller-test\\h.log",
+    "updates":  [
+                    {
+                        "id":  "3383a48e-6a94-4186-8bc6-1c581eaaf747",
+                        "revision":  200,
+                        "title":  "Jedna \"cytat\" \\ back zażółć x",
+                        "status":  "pending",
+                        "hresult":  null,
+                        "rebootRequired":  false
+                    }
+                ],
+    "updated":  "2026-11-22T16:50:37.7367748+01:00"
+}

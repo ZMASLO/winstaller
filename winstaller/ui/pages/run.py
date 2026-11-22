@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
@@ -32,7 +34,9 @@ from PySide6.QtWidgets import (
 from winstaller.core.catalog import Item
 from winstaller.core.runner import RunSummary, TaskResult, TaskStatus
 from winstaller.ui.bridge import LogStore
+from winstaller.ui.services import ClockFn, local_now
 from winstaller.ui.theme import Role, ThemeManager, font
+from winstaller.ui.widgets.background_panel import BackgroundUpdatePanel
 from winstaller.ui.widgets.common import (
     CursorBlock,
     button,
@@ -218,11 +222,24 @@ class TaskDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class _QueueStack(QStackedWidget):
+    """The queue views under the "W tle" block. A stacked widget reports the largest
+    page's height-for-width as its minimum (the queue view, even while the "empty
+    queue" page is shown), which would squeeze the block above: it takes what is
+    left instead."""
+
+    def hasHeightForWidth(self) -> bool:
+        return False
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(super().minimumSizeHint().width(), 1)
+
+
 class RunPage(QWidget):
     """Public hooks: ``model``, ``stop_button``, ``retry_button``, ``back_button``,
     ``progress``, ``counter_label``, ``current_label``, ``summary_label``, ``log_view``,
-    ``log_toggle``; signals ``stopRequested``, ``retryRequested``, ``backRequested``,
-    ``browseRequested``.
+    ``log_toggle``, ``bg_panel`` (the "W tle" block, see widgets/background_panel.py);
+    signals ``stopRequested``, ``retryRequested``, ``backRequested``, ``browseRequested``.
     """
 
     stopRequested = Signal()
@@ -230,7 +247,15 @@ class RunPage(QWidget):
     backRequested = Signal()
     browseRequested = Signal()
 
-    def __init__(self, log: LogStore, theme: ThemeManager, parent: QWidget | None = None):
+    def __init__(
+        self,
+        log: LogStore,
+        theme: ThemeManager,
+        parent: QWidget | None = None,
+        *,
+        clock: ClockFn = local_now,
+        path_exists: Callable[[Path], bool] = Path.exists,
+    ):
         super().__init__(parent)
         self.setObjectName("page_run")
         self._theme = theme
@@ -245,10 +270,15 @@ class RunPage(QWidget):
         self._tick.timeout.connect(self._update_clock)
         self._status_text = ""
 
-        self.stack = QStackedWidget()
+        self.stack = _QueueStack()
+        # Independent of the queue: the detached Windows Update installation.
+        self.bg_panel = BackgroundUpdatePanel(theme, clock, path_exists=path_exists)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.addWidget(self.stack)
+        outer.setSpacing(0)
+        outer.addWidget(self.bg_panel)
+        outer.addWidget(self.stack, 1)
+        self.stack.currentChanged.connect(lambda i: self.bg_panel.set_compact(i == 1))
 
         # -- idle (nothing run yet)
         idle = QWidget()

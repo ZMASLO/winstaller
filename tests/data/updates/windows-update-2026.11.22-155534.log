@@ -1,0 +1,27 @@
+﻿2026-11-22 15:55:34 Winstaller uruchamia instalację aktualizacji Windows w tle (6 pozycji).
+2026-11-22 15:55:34 Start instalacji aktualizacji w tle (PID 9968).
+2026-11-22 15:55:34 Wyszukiwanie aktualizacji...
+2026-11-22 15:55:41 Znaleziono 6 aktualizacji.
+2026-11-22 15:55:41 Pobieranie 5 aktualizacji...
+2026-11-22 15:58:44 Pobieranie zakończone: OK.
+2026-11-22 15:58:44 Instalacja: Aktualizacja analizy zabezpieczeń dla Microsoft Defender Antivirus — KB2267602 (Wersja 1.463.417.0) — Bieżący kanał (ogólna dostępność)
+2026-11-22 15:58:49 -> OK (0x00000000)
+2026-11-22 15:58:49 Nie udało się zapisać pliku statusu: Exception calling "Replace" with "3" argument(s): "Ścieżka ma niedozwolony format."
+2026-11-22 15:58:49 Instalacja: Hewlett-Packard  - Other hardware, Printer - Null Print - HP Officejet Pro 6230
+2026-11-22 15:58:51 -> OK (0x00000000)
+2026-11-22 15:58:51 Nie udało się zapisać pliku statusu: Exception calling "Replace" with "3" argument(s): "Ścieżka ma niedozwolony format."
+2026-11-22 15:58:51 Instalacja: Apple, Inc. USBDevice Driver Update (552.0.0.0)
+2026-11-22 15:58:51 -> OK (0x00000000)
+2026-11-22 15:58:51 Nie udało się zapisać pliku statusu: Exception calling "Replace" with "3" argument(s): "Ścieżka ma niedozwolony format."
+2026-11-22 15:58:51 Instalacja: Microsoft Corporation AudioProcessingObject Driver Update (1.0.4.55794)
+2026-11-22 15:58:52 -> OK (0x00000000)
+2026-11-22 15:58:52 Nie udało się zapisać pliku statusu: Exception calling "Replace" with "3" argument(s): "Ścieżka ma niedozwolony format."
+2026-11-22 15:58:52 Instalacja: 2026-11 Aktualizacja wersji Preview (KB5132057) (26300.10075)
+2026-11-22 16:03:39 -> OK (0x00000000), wymaga restartu
+2026-11-22 16:03:39 Nie udało się zapisać pliku statusu: Exception calling "Replace" with "3" argument(s): "Ścieżka ma niedozwolony format."
+2026-11-22 16:03:39 Instalacja: 2026-11 Aktualizacja wersji Preview platformy .NET Framework w wersji (KB5137006)
+2026-11-22 16:04:22 -> OK (0x00000000), wymaga restartu
+2026-11-22 16:04:22 Nie udało się zapisać pliku statusu: Exception calling "Replace" with "3" argument(s): "Ścieżka ma niedozwolony format."
+2026-11-22 16:04:22 Aby dokończyć instalację, uruchom ponownie komputer (Winstaller nie robi tego automatycznie).
+2026-11-22 16:04:22 Nie udało się zapisać pliku statusu: Exception calling "Replace" with "3" argument(s): "Ścieżka ma niedozwolony format."
+2026-11-22 16:04:22 Koniec (kod 0).

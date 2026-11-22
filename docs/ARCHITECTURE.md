@@ -619,6 +619,30 @@ def verify_background_start(started, *, cancel_event=None, timeout=START_CONFIRM
 def update_store_apps(*, cancel_event=None, timeout=STORE_TIMEOUT, log=None) -> StoreUpdateResult
 def list_store_queue(*, cancel_event=None, timeout=STORE_TIMEOUT) -> StoreUpdateResult  # tylko odczyt
 def log_dir() -> Path; def existing_log_dirs() -> list[Path]   # tworzy / tylko czyta
+# postęp instalacji w tle (tylko odczyt; opis niżej, „Postęp instalacji w tle”):
+@dataclass(frozen=True) class InstallItem:
+    title; status: ItemStatus; id ("" gdy znane tylko z logu); revision; hresult; reboot_required
+    done / ok / failed (properties)
+@dataclass(frozen=True) class InstallProgress:   # done = finished|stale|unknown (unknown: końcowy)
+    state: "running"|"finished"|"stale"|"unknown"; phase: "searching"|"downloading"|
+    "installing"|"finished"|"unknown"; total; current; current_title; download_total;
+    download_current; items: tuple[InstallItem, ...]; reboot_required; exit_code; error;
+    started; finished; updated; phase_started; step_started (aware, czas lokalny);
+    log_path; status_path; pid; alive: bool; from_log: bool
+    done / ok_count / failed_count / skipped_count / count / succeeded / steps_done /
+    steps_total / key (nazwa pliku statusu) / reference_time (properties)
+@dataclass(frozen=True) class InstallLogSummary:
+    exit_code; items; reboot_required; pid; found; started; finished; ok_count; failed_count
+parse_install_status(text, *, path=None) -> InstallProgress    # czysty, @_parser
+parse_install_log(text) -> InstallLogSummary                    # czysty, @_parser
+def read_install_progress(status_path) -> InstallProgress       # tylko UpdatesError
+def find_background_install() -> InstallProgress | None         # najnowszy z zaufanych katalogów
+def describe_progress(progress, *, mention_restart=True) -> tuple[str, str]  # (tytuł, podtytuł) PL
+def system_boot_time() -> datetime; def read_shared(path, limit) -> bytes    # warstwa systemowa
+PROGRESS_HINT, ITEM_STATUSES, ITEM_OK, ITEM_FAILED, ITEM_DONE, READ_ATTEMPTS, MAX_STATUS_BYTES,
+LOST_MESSAGE, LOG_AHEAD, INSTALLER_START_BEFORE/AFTER
+# needs_restart (property), InstallLogSummary.positions/phase/current_index/current_title/last
+def process_create_time(pid) -> datetime | None; def is_installer_process(pid, started) -> bool
 # czyste (bez I/O; śmieci -> UpdatesError, nigdy nic innego — dekorator @_parser):
 parse_wu_scan(text, *, stderr="", returncode=0) -> WindowsUpdateScan
 parse_store_update(text, *, stderr="", returncode=0) -> StoreUpdateResult
@@ -638,7 +662,9 @@ startuje; anulowanie w trakcie → zabicie procesu i `UpdatesCancelled`; timeout
 `run_store_cli(args, *, timeout, cancel_event) -> (returncode, output)`, `log_dir()`,
 `existing_log_dirs()`, `create_secure_dir(path, sddl)`, `read_dir_security(path)`,
 `dir_is_trusted(path)`, `process_image(pid)`, `process_running(pid)`,
-`is_live_powershell(pid)`, `background_exit_code(pid)`, `read_status(path)`. Skrypty:
+`is_live_powershell(pid)`, `background_exit_code(pid)`, `read_status(path)`,
+`read_shared(path, limit)` (odczyt z udostępnianiem odczytu/zapisu/**usuwania** — patrz
+„Pliki logu i statusu”), `system_boot_time()`. Skrypty:
 `update_scripts` (`WU_SCAN_SCRIPT`, `WU_INSTALL_SCRIPT`, `STORE_SCRIPT`, `ALL_SCRIPTS`,
 `WU_CRITERIA`, `WU_FALLBACK_CRITERIA`).
 
@@ -672,9 +698,11 @@ skanu w logu (ResultCode 3, pominięte wadliwe pozycje) → lista (`  KB… — 
 `--no-elevate`): **FAILED** „wymaga uprawnień administratora”, nic nie startuje → start procesu
 w tle z allow-listą ID ze skanu → **weryfikacja startu** (`verify_background_start`, niżej) →
 OK z komunikatem „Znaleziono N aktualizacji (w tym M opcjonalnych); instalacja uruchomiona w
-tle. Postęp: Ustawienia → Windows Update lub log <ścieżka>. Po zakończeniu może być wymagany
-restart.” i `artifact` = log. Strona Przebieg nie pokazuje `artifact` pozycji kolejki, więc
-ścieżka jest w logu, dzienniku i komunikacie.
+tle. Postęp: zakładka Przebieg (blok „W tle”) i log <ścieżka>. Po zakończeniu może być
+wymagany restart.” i `artifact` = log (dry-run: `DRY_RUN_LOG_PATH`). Z `artifact` UI ustala
+plik statusu do śledzenia (`.json` obok logu). Panel Ustawienia → Windows Update **nie
+pokazuje** instalacji zleconej przez WUA z innego procesu (sprawdzone 2026-11-22 na
+sprzęcie) — stąd blok „W tle” w Winstallerze.
 
 **Weryfikacja startu** (`verify_background_start`): do 10 s (Stop przerywa — wtedy
 `CANCELLED` z informacją, że instalacja mogła już ruszyć) czytany jest plik statusu. Sukces
@@ -708,14 +736,31 @@ z ostrzeżeniem w logu, gdy lista przekracza `MAX_IDS_CHARS` = 30 000 znaków),
 zaraz ogranicza jego DACL do Administratorów i SYSTEM (chroniony,
 `MutexSecurity`), sprawdza uprawnienia (kod 4 przed pierwszym statusem), sam wyszukuje
 ponownie (to samo kryterium), instaluje tylko pozycje z allow-listy, `AcceptEula()`, czeka do
-10 min, gdy `IsBusy`, kończy kodem 5 przy `RebootRequiredBeforeInstallation`, pobiera jednym
-`IUpdateDownloader.Download()` (tylko niepobrane), instaluje **pojedynczo** (`IUpdateInstaller`,
+10 min, gdy `IsBusy`, kończy kodem 5 przy `RebootRequiredBeforeInstallation`, pobiera
+**pojedynczo** (tylko niepobrane; dla każdej nowy `IUpdateDownloader` i synchroniczne
+`Download()` na kolekcji jednoelementowej — to samo wywołanie, które 2026-11-22 zadziałało na
+sprzęcie dla całej listy; wynik pozycji wg `IsDownloaded`, błąd jednej nie przerywa reszty),
+instaluje **pojedynczo** (`IUpdateInstaller`,
 `ForceQuiet`, `AllowSourcePrompts = $false`; aktualizacja z wyłącznym trybem instalacji musi
 być sama, a jeden błąd nie przerywa reszty), wyjątki per aktualizacja, nigdy restart. Kody
 wyjścia: 0 OK/nic do zrobienia, 1 nieoczekiwany błąd, 2 część się nie udała, 3 inna instancja
 (mutex), 4 brak admina, 5 wymagany restart przed instalacją, 6 WU zajęty, 7 złe parametry.
-Długość: skrypt po `compact_script` (bez wcięć, pustych linii i komentarzy) daje ok. 23 tys.
-znaków `-EncodedCommand` — poniżej limitu 32 767 (`powershell_args` sprawdza całość i rzuca
+Wynik pobrania i instalacji: tylko `ResultCode` 2/3 to sukces (pobranie: dodatkowo
+`IsDownloaded`, odczytywane wewnątrz `try`); każdy inny kod (także 0/1 po synchronicznym
+wywołaniu) to błąd i `$anyFailed` → kod wyjścia 2. Pozycja z błędem pobrania, którą WUA mimo to
+uznaje za pobraną (`IsDownloaded`), jest w fazie instalacji instalowana (wynik instalacji
+nadpisuje status). W `finally` pozycje niedokończone dostają status końcowy: `pending`/
+`downloaded` → `skipped`, `downloading`/`installing` → `aborted` (także przy kodach 5/6 i po
+wyjątku). Długość: skrypt po `compact_script` (bez wcięć, pustych linii i komentarzy) daje ok.
+27,5 tys. znaków `-EncodedCommand` (cały wiersz poleceń 27 677 = 84,5 % limitu; test pilnuje
+< 85 %). Żeby zmieścić znacznik `[i]`, domknięcie statusów i warunki `-in 2, 3`, skrócono
+komunikaty logu dla kodów 3–6 i pomijania pozycji oraz w regule `MutexAccessRule` zamieniono
+typy wyliczeniowe na napisy `'FullControl', 'Allow'` (konwersja PowerShella; sprawdzone
+2026-11-22 na prywatnym muteksie w scratchpadzie: reguły SYSTEM i Administratorzy
+FullControl Allow). **Dalsze dopisywanie wymaga innego rozwiązania** — propozycja: skrypt
+przez standardowe wejście (`powershell.exe -Command -`, potok zamykany po zapisie; nadal bez
+pliku na dysku) zamiast `-EncodedCommand`, co zdejmuje limit wiersza poleceń; wymaga testu
+uruchamiania odłączonego procesu z potokiem — poniżej limitu 32 767 (`powershell_args` sprawdza całość i rzuca
 `UpdatesError`; `--smoke` buduje wszystkie trzy i wypisuje maksimum). `-EncodedCommand` zamiast
 pliku `.ps1`: brak pliku na dysku = nic do podmiany między zapisem a uruchomieniem.
 
@@ -749,12 +794,113 @@ kolizji sufiks `-2`…; `latest_log` sortuje naturalnie: znacznik czasu, potem s
 czas modyfikacji). Log: UTF-8 z BOM (Notatnik), linia po linii z czasem, po polsku, tekst
 oczyszczany ze znaków sterujących, separatorów linii i znaków bidi/zero-width (`Get-CleanText`
 w skrypcie, `_one_line` w Pythonie); pierwszą linię zapisuje Winstaller (`open(..., "x")` —
-wyłączne utworzenie; przy nieudanym starcie procesu plik jest usuwany), resztę skrypt. Status
-JSON (UTF-8 bez BOM, znacznik `"winstaller": "wu-install"`): na starcie `state: running`,
-`pid`; po każdej aktualizacji wyniki; na końcu `state: finished`, `updates[]` (`id`,
-`revision`, `title`, `result`: succeeded|succeeded_with_errors|failed|aborted|unknown|
-not_downloaded|error, `hresult`, `rebootRequired`), `rebootRequired`, `exitCode`, `error`.
-Zapis atomowy: stary `.tmp` usuwany, nowy tworzony `CreateNew`, potem `File.Replace`/`Move`.
+wyłączne utworzenie; przy nieudanym starcie procesu plik jest usuwany), resztę skrypt. Linie
+logu, na których opiera się `parse_install_log`: `Start instalacji aktualizacji w tle (PID n).`,
+`Znaleziono n aktualizacji.`, `Pobieranie k z n [i]: <tytuł>` + `-> pobrano` / `-> nie
+pobrano (0x…)`, `Instalacja [i]: <tytuł>` + `-> [i] OK|OK z błędami|błąd|przerwano|kod N
+(0x…)[, wymaga restartu]` albo `-> [i] błąd (0x…): <komunikat>` (wyjątek), `Nie pobrano,
+pomijam instalację [i]: <tytuł>`, dokładnie `Aby dokończyć instalację, uruchom ponownie
+komputer (Winstaller nie robi tego automatycznie).`, `Koniec (kod n).` — `[i]` to pozycja
+1..N w `updates[]` statusu (logi sprzed znacznika: bez `[i]`). Każdy wzorzec jest
+dopasowywany do **całej** treści linii po znaczniku czasu, więc tytuł aktualizacji nie
+podrobi wyniku, restartu ani końca.
+
+Status JSON (UTF-8 bez BOM, znacznik `"winstaller": "wu-install"`, zapisywany przy **każdym
+kroku**):
+
+| Pole | Znaczenie |
+|---|---|
+| `state` | `running` → `finished` (w `finally`, zawsze) |
+| `phase` | `searching` → `downloading` (gdy jest co pobrać) → `installing` → `finished` |
+| `pid`, `started`, `finished`, `exitCode`, `error`, `rebootRequired` | jak wcześniej; `rebootRequired` globalnie |
+| `updated` | czas ostatniego zapisu (ustawiany w `Save-Status`) |
+| `phaseStarted`, `stepStarted` | początek fazy / bieżącej aktualizacji (ISO 8601 z przesunięciem) |
+| `total`, `current` | liczba aktualizacji do zrobienia (po wyszukaniu) i indeks 1..N bieżącej (kolejność instalacji) |
+| `downloadTotal`, `downloadCurrent` | ile trzeba pobrać i która z nich jest pobierana („Pobieranie 2 z 5”) |
+| `currentTitle` | tytuł bieżącej aktualizacji (`null` po końcu) |
+| `log` | ścieżka logu (Python i tak bierze `.log` obok pliku statusu) |
+| `updates[]` | **od razu po wyszukaniu**: `id`, `revision`, `title`, `status` (`pending`, `downloading`, `downloaded`, `installing`, `succeeded`, `succeeded_with_errors`, `failed`, `aborted`, `not_downloaded`, `error`, `unknown`, `skipped`), `hresult`, `rebootRequired` |
+
+Zgodność wstecz: pliki sprzed tej zmiany (bez `phase`/`total`/`status`; wyniki w `result`)
+czytają się — `phase = "unknown"`, wynik pozycji z `result`, `total` = długość listy.
+
+Zapis atomowy (`Save-Status`): stary `.tmp` usuwany, nowy tworzony `CreateNew`
+(`FileShare.None`), potem `File.Replace(tmp, status, [NullString]::Value)` albo `Move`, gdy
+statusu jeszcze nie ma; do 20 prób co 50 ms. **Błąd z 2026-11-22 (potwierdzony na
+sprzęcie):** wcześniej trzeci argument był `$null`, a PowerShell przekazuje `$null` do
+parametru typu `string` jako `""` → `File.Replace` rzucał „Ścieżka ma niedozwolony format”.
+Pierwszy zapis szedł gałęzią `Move` i działał, każdy kolejny padał, więc status zostawał na
+`running` z pustą listą (a obok `.json.tmp` z poprawną treścią). Instalacja się udała (6/6),
+tylko wynik nie trafił do statusu. Druga pułapka: `File.Replace` potrzebuje prawa usuwania
+pliku docelowego, a Python `open()` nie udostępnia `FILE_SHARE_DELETE` — czytelnik w
+Pythonie trzymający plik w chwili zapisu powodował błąd współdzielenia; dlatego Python czyta
+przez `read_shared` (`CreateFileW` z `FILE_SHARE_READ|WRITE|DELETE`) z ponowieniem
+(w trakcie `ReplaceFile` plik bywa przez mikrosekundy „nie znaleziony” albo zablokowany).
+
+Sprawdzone 2026-11-22 w PowerShell 5.1 na nieszkodliwym skrypcie (funkcje `Save-Status` /
+`Set-Phase` / `Set-Step` wycięte z `WU_INSTALL_SCRIPT`, plik w scratchpadzie, nic z Windows
+Update): stara wersja — 20 z 21 zapisów z tym samym błędem co na sprzęcie; nowa — 61, 101,
+201 i 401 zapisów pod rząd bez błędu, także gdy równolegle czyta proces Pythona w pętli:
+`read_shared` 0 błędów zapisu (czytelnik widział 0 niepoprawnych JSON-ów, ~150 chwilowych
+„nie znaleziono”/błędów współdzielenia — stąd ponowienie), `read_install_progress` 532/532
+odczytów bez wyjątku; z czytelnikiem przez zwykły `open()` 71 zapisów z 101 padło mimo
+ponowień (dowód, że udostępnianie usuwania jest potrzebne). Pozostałe skrypty nie przekazują
+`$null` do parametrów `string` metod .NET (jedyne `$null` w wywołaniu: `MethodInfo.Invoke($null,
+…)` — parametr typu `object`).
+
+**Postęp instalacji w tle** (`read_install_progress`, `find_background_install`; tylko
+odczyt). `read_install_progress(status)`: do 5 prób (co 50 ms) odczytu i parsowania; stan z
+pliku `running` jest weryfikowany procesem (`is_installer_process`): żywy `powershell.exe` o
+tym PID, `started` po ostatnim rozruchu (`system_boot_time()` − 5 s) **i** czas utworzenia
+procesu (`process_create_time`, `GetProcessTimes`) w przedziale [`started` − 10 min,
+`started` + 60 s] — PID użyty ponownie przez inny PowerShell (choćby skan samego
+Winstallera) nie jest instalatorem; gdy czasu nie da się odczytać, decyduje sama nazwa
+obrazu. Ta sama reguła w `running_install()`. Wtedy `alive = True`; inaczej **`stale`**:
+proces skończył się bez zapisania wyniku. Wynik jest odtwarzany z logu obok
+(`parse_install_log`; log innego PID-u jest ignorowany): ostatnie `Koniec (kod N).` →
+`exit_code`, `phase = finished`, wyniki pozycji, restart, `from_log = True`. Wyniki z logu
+trafiają do pozycji statusu po znaczniku `[i]` (gdy tytuł się zgadza), w starych logach po
+**kolejności wystąpień** (k-te „Instalacja: T” → k-ta pozycja o tytule T — sterowniki często
+mają te same tytuły); niedopasowane są dopisywane. Brak `Koniec` → „Instalacja przerwana”
+(pozycje w trakcie = `[PRZERWANO]`, liczone jako nieudane; nieruszone = `[POMINIĘTO]`).
+`running` bez PID-u → wynik z logu, a bez niego **`unknown`** — stan **końcowy** („Stan
+instalacji nieznany — Nie można odczytać stanu instalacji — sprawdź log.”), podlega filtrowi
+„po ostatnim rozruchu” i nie jest odpytywany. Żywy instalator, którego `updated` jest starsze
+niż 2 min (`LOG_AHEAD`), a log ma linie nowsze o ponad 2 min od `updated` (zapisy statusu
+padają, log idzie dalej): widok uzupełniany z logu (wyniki, bieżąca pozycja i etap),
+`from_log = True`, podtytuł „Stan wg logu (plik statusu nie jest aktualizowany).”.
+`find_background_install()`: pliki `windows-update-<znacznik>.json` ze wszystkich
+`existing_log_dirs()` (tylko zaufane, nic nie tworzy), sortowane jak `latest_log`;
+pomijane są tylko pliki JSON wyraźnie nie nasze (inny znacznik `winstaller`); gdy
+najnowszy nasz plik jest nieczytelny, wynikiem jest `unknown` dla niego (z jego logiem), a
+nie starszy zakończony przebieg. Sukces (`succeeded`) tylko przy `exit_code == 0`, bez
+pozycji nieudanych i bez pominiętych/niedokończonych; `finished` bez kodu albo z pominiętymi →
+„Zakończono niepełne (k z n zainstalowano)”. Restart (`needs_restart`) = flaga globalna lub
+którakolwiek pozycja (lub log). Odczyt pliku kilku KB + parsowanie: 0,2 ms (stan `stale` z
+logiem: 0,9 ms), ale ponowienia mogą potrwać do ~0,2 s, więc UI czyta w wątku roboczym.
+Na tej maszynie (2026-11-22, Winstaller bez podniesienia) `find_background_install()`
+zwraca dzisiejszy przebieg z `C:\ProgramData\Winstaller\logs` (katalog zaufany): `stale`,
+`from_log`, 6 OK, kod 0, restart → „Zakończono — wymagany restart”.
+
+**Heartbeat — świadomie nie ma.** Pole `updated` zmienia się przy każdym zapisie, ale nic nie
+zapisuje statusu w trakcie jednej długiej operacji (`Install()` aktualizacji zbiorczej ~5 min,
+`Download()` ~minuty). Osobny runspace/wątek z zegarem w podniesionym procesie oznaczałby
+drugiego pisarza tego samego pliku (synchronizacja `.tmp`/`Replace` między wątkami) obok
+synchronicznego wywołania COM, którego nie da się sprawdzić bez prawdziwej instalacji;
+akcje zdarzeń `Register-ObjectEvent` (np. `System.Timers.Timer`) wykonuje wątek potoku
+między poleceniami, więc w trakcie wywołania COM i tak by nie ruszyły (zachowanie PowerShella
+znane z dokumentacji, tu niesprawdzane). Ryzyko dla działającej (sprawdzonej na sprzęcie)
+instalacji jest większe niż zysk: „żywotność” określa Python sprawdzeniem procesu
+(`is_live_powershell`), a UI pokazuje czas trwania bieżącego kroku liczony od `stepStarted`.
+
+**Czego nie pokazujemy i dlaczego.** Procentu wewnątrz jednej aktualizacji (pobierania ani
+instalacji): wymagałby asynchronicznych `BeginDownload`/`BeginInstall` z
+`IDownloadProgressChangedCallback`/`IInstallationProgressChangedCallback` (obiekty COM
+implementowane w PowerShellu albo odpytywanie `IDownloadJob.GetProgress()`), czyli innej
+ścieżki niż sprawdzona 2026-11-22 na sprzęcie. **Możliwe rozszerzenie**, które wymaga testu
+na prawdziwym sprzęcie (pobranie i instalacja realnych aktualizacji). Nie pokazujemy też
+rozmiarów (`MaxDownloadSize` jest bezużyteczny — patrz kryterium) ani niczego z panelu
+Ustawień.
 
 **Środowisko procesów potomnych** (`_child_env`, każdy PowerShell i `store.exe`): biała
 lista `CHILD_ENV_ALLOWED` (`SystemRoot`, `windir`, `SystemDrive`, `ComSpec`, `PATHEXT`,
@@ -823,9 +969,15 @@ mutex, a `start_windows_update_install` przy trzymanym mutexie niczego nie uruch
 **ZNANE NIEWIADOME — wymagają testu na prawdziwym sprzęcie** (nie wolno było uruchamiać
 pobierania/instalacji ani zlecenia Store):
 
-- czy `IUpdateInstaller.Install()` instaluje Preview LCU (pakiety UUP/checkpoint) i .NET Preview
-  w procesie spoza Ustawień, jak długo to trwa i czy `ForceQuiet` nie powoduje odmowy; czy
-  instalacja pojedynczo nie psuje zależności (LCU wymagający SSU w tym samym przebiegu);
+- ~~czy `IUpdateInstaller.Install()` instaluje Preview LCU i .NET Preview w procesie spoza
+  Ustawień~~ — **sprawdzone na sprzęcie 2026-11-22** (stary skrypt, pobieranie jednym
+  `Download()`): 6/6 OK, w tym Preview LCU i .NET Preview, kod 0, wymagany restart;
+  pobieranie ~3 min, instalacja LCU ~5 min; Ustawienia tej instalacji nie pokazują;
+- **nowy skrypt nie był uruchamiany na sprzęcie**: pobieranie pojedyncze (`Download()` na
+  kolekcji jednoelementowej, nowy downloader dla każdej) — czy WUA nie zachowuje się inaczej
+  niż dla całej listy (np. zależności między pakietami jednej aktualizacji, LCU + SSU), czas
+  całości; zapis statusu przy każdym kroku (`[NullString]::Value`, ponowienia) sprawdzony
+  tylko na nieszkodliwym skrypcie z tymi samymi funkcjami;
 - czy sterowniki z flagą `CanRequestUserInput` instalują się z `ForceQuiet` i czy sterownik
   klasy Display z WU nie nadpisze sterownika producenta z tej samej kolejki (decyzja
   właściciela: nie pomijamy);
@@ -996,12 +1148,13 @@ ui/
   app.py           create_application() (Fusion, fonty, ikona), run(), load_theme_mode()
   services.py      Services: wszystko spoza UI, wstrzykiwalne (testy, zrzuty, dry-run)
   bridge.py        granica wątków: LogStore, RunController, ToolController,
-                   UpdateController, WingetController, Job (wątki tła)
+                   UpdateController, WingetController, BackgroundUpdateMonitor, Job (wątki tła)
   main_window.py   MainWindow: nawigacja, banery, spinanie stron z kontrolerami
   selection.py     SelectionModel: jedyne źródło prawdy o zaznaczeniu (blokowane w biegu)
   icons.py         ikona rysowana w kodzie (ta sama w tools/make_icon.py -> .ico)
   pages/           selection (Aplikacje/System), run (Przebieg), tools, log (Dziennik), about
-  widgets/         item_tile, action_bar, banner, log_view, nav, confirm_dialog, common
+  widgets/         item_tile, action_bar, banner, log_view, nav, confirm_dialog, common,
+                   background_panel (blok „W tle” strony Przebieg)
   theme/           tokens (palety), qss, fonts, manager (tryb system/ciemny/jasny)
 ```
 
@@ -1013,6 +1166,67 @@ akcje natychmiastowe z wynikiem i „Otwórz” dla `artifact`), „Dziennik” 
 kopiuj/zapisz/wyczyść), „O programie” (motyw, ręczne sprawdzenie aktualizacji).
 Pozycje z `confirm` w kolejce wymagają jednego zbiorczego potwierdzenia; zamknięcie okna w
 trakcie biegu pyta, a po zgodzie zatrzymuje kolejkę i zamyka okno po `run_finished`.
+
+**Instalacja aktualizacji Windows w tle — co widzi użytkownik.**
+
+- Strona Przebieg, nad kolejką, niezależnie od niej: `BackgroundUpdatePanel` (`wuPanel`):
+  nagłówek `// W TLE — WINDOWS UPDATE` + `START gg:mm · KROK mm:ss` (czas bieżącego kroku od
+  `stepStarted`, po końcu `KONIEC gg:mm`, `WG LOGU`), „Lista (N)”/„Zwiń listę”, „Otwórz log”
+  (`Services.open_path`); duży stan z `describe_progress` („Wyszukiwanie aktualizacji”,
+  „Pobieranie 2 z 5”, „Instalacja 5 z 6”, „Zakończono — wymagany restart”, „Zakończono z
+  błędami (2 z 6 nieudane)”, „Instalacja przerwana”, „Nie zainstalowano aktualizacji”), tytuł
+  bieżącej aktualizacji, pasek krokowy (`steps_done/steps_total`: pobrania + instalacje; w
+  trakcie jednego długiego kroku pasek stoi, a sygnałem „trwa” jest migający kursor i licznik
+  — żadnych udawanych procentów), lista (`[OCZEKUJE]`, `[POBIERANIE]`, `[POBRANO]`,
+  `[INSTALACJA]`, `[OK]`, `[BŁĄD]` + kod, po końcu `[POMINIĘTO]`/`[PRZERWANO]`), po końcu
+  liczby `[OK] n · [BŁĄD] n` i ramka `[WYMAGANY RESTART]`. Bez przycisku restartu. Przy
+  pustej kolejce blok jest pełny (H1, lista do 8 wierszy); gdy widok kolejki jest pokazany —
+  kompaktowy (H2, lista zwinięta poza nieudanymi); gdy kolejka **biegnie**, żółty należy do
+  niej: kursor bloku znika, pasek bloku jest szary (`set_secondary`). Kolory: żółty tylko to,
+  co trwa; `[OK]` w kolorze tekstu; czerwony tylko błąd; restart — obrys bez koloru.
+  Zegar: dla dnia innego niż dziś z datą (`START 2026.11.21 15:55`). „Otwórz log” wyłączony,
+  gdy pliku logu nie ma (`Services.path_exists`). Gdy żywy instalator stoi w jednym kroku
+  dłużej niż `STALL_SECONDS` (90 min), podtytuł dostaje „Brak postępu od g:mm:ss — sprawdź
+  log.” (bez zmiany stanu, znacznika ani czegokolwiek w systemie). Stan `unknown` (np.
+  plik statusu zniknął w trakcie): „Stan instalacji nieznany”, ostatnie znane statusy pozycji
+  bez werdyktu, bez liczb.
+- Nawigacja: drugi znacznik przy „Przebieg” (`NavButton.extra_badge`): `WU …` (szukanie),
+  `WU 2/5` (pobieranie: k/n pobrań; instalacja: i/N) — żółty, gdy kolejka nie biegnie,
+  inaczej szary; po końcu `WU OK` (kolor tekstu, tylko czysty sukces) / `WU BŁ.` (czerwony:
+  błędy, niepełne, przerwane) / `WU ?` (czerwony, `unknown`).
+- Po zakończeniu baner `wuBanner` (niemodalny, u góry): „Aktualizacje Windows zainstalowane —
+  uruchom ponownie komputer” / „Brak aktualizacji Windows do zainstalowania”
+  (`tone="neutral"`: obrys szary, tag w kolorze tekstu) / „… zakończone z błędami” /
+  „Instalacja aktualizacji Windows niepełna” / „… przerwana” / „Nie zainstalowano
+  aktualizacji Windows” / „Stan instalacji aktualizacji Windows nieznany” (`tone="error"`),
+  szczegół z liczbami (nieudane, pominięte, „wynik odczytany z logu”), akcje „Pokaż →”
+  (`wuBannerShow`, Przebieg), „Otwórz log” (`wuBannerLog`, tylko gdy log istnieje), „Ukryj”
+  (`wuBannerHide`: chowa baner, znacznik nawigacji i — dla stanu końcowego — blok, od razu i
+  przy kolejnych startach: `QSettings` `updates/hiddenBackgroundInstall` = nazwa pliku
+  statusu; trwającej instalacji nie da się ukryć).
+- Start programu (`start_background_tasks`, po `show()`, w wątku): `find_background_install`;
+  trwająca → blok + śledzenie; zakończona/`stale` → pokazana tylko, gdy `reference_time`
+  (koniec, inaczej ostatni zapis, inaczej start) ≥ `Services.boot_time()` i nie ukryta. Po
+  restarcie komputera stary wynik więc znika.
+- Zamknięcie okna, gdy instalacja w tle trwa: jedno pytanie „Zamknąć Winstaller?” („…
+  instalują się dalej w tle — zamknięcie Winstallera ich nie przerwie… Log: …”, „Zamknij” /
+  „Anuluj”); gdy jednocześnie biegnie kolejka — istniejące pytanie o kolejkę z tym zdaniem
+  dopisanym (jedno okno, nie dwa).
+- Dziennik: zmiana stanu (tytułu) dopisuje linię `[winstaller] Windows Update w tle: …`.
+
+**`BackgroundUpdateMonitor`** (`bridge.py`, `MainWindow.bg_updates`): `track(status_path)` /
+`track_result(TaskResult)` (pozycja `windows-update` OK **albo CANCELLED** — przerwane
+czekanie na potwierdzenie startu — z `artifact` `.log` → `.json` obok; pewniejsze niż
+„najnowszy plik”, bo to dokładnie ten przebieg, także „już trwa”) i `detect(is_hidden)`
+(start; stany końcowe, w tym `unknown`, tylko po ostatnim rozruchu i nieukryte). Odpytuje
+co `Services.background_poll_ms` (1000) **tylko** gdy coś śledzi, każdy odczyt w
+wątku-demonie (`Job`; nowy odczyt nie startuje, gdy poprzedni trwa), `changed(InstallProgress)`
+tylko przy faktycznej zmianie migawki (równość dataclass), zatrzymuje się po stanie
+końcowym albo po `MAX_FAILURES` (60) nieudanych odczytach z rzędu (pierwszy błąd do
+dziennika) — wtedy, jeśli coś już było widać, ostatnia migawka przechodzi w końcowe
+`unknown` z `LOST_MESSAGE` (żadnego zamrożonego „WU 1/4” ani pytania przy zamykaniu). Wynik, który przyjdzie po zamknięciu okna, jest ignorowany
+(`threading.Event`, nie atrybut QObject). Właściwości: `progress`, `polling`, `running`,
+`status_path`, `enabled`.
 
 ### Model wątków
 
@@ -1036,7 +1250,15 @@ Pola: `catalog`, `runner_factory`, `tool_runner_factory` (`preserve_order=True`)
 pobieranie symulowane bez podmiany), `update_dest` (obok exe, gdy da się pisać; inaczej
 `%TEMP%` — `apply` radzi sobie z innym woluminem), `cleanup_old`, `winget_available`,
 `ensure_winget`, `open_path`, `open_url`, `confirm` (`None` = modalny `ConfirmDialog`),
-`auto_check_updates`, `check_winget_on_start`. Testy budują `Services` bezpośrednio z
+`auto_check_updates`, `check_winget_on_start`, `find_background_install`,
+`read_install_progress` (`None` = blok „W tle” wyłączony; tak jest w testach UI, które ich
+nie podają), `boot_time` (`None` = bez limitu „niedawno”), `clock` (aware czas lokalny),
+`background_poll_ms`, `path_exists` (czy log istnieje — „Otwórz log”). Realnie: funkcje `core.updates`. Dry-run:
+`SimulatedBackgroundInstall` (pierwszy odczyt ścieżki uruchamia oś czasu: wyszukiwanie,
+3 pobrania, 4 instalacje — pierwsza 3 kroki — koniec z restartem; krok = 8 ×
+`WINSTALLER_DRY_RUN_DELAY`, przy 0 od razu koniec; bez plików i procesów),
+`find_background_install = lambda: None`, `boot_time` = teraz − 1 h; czysta funkcja
+`simulated_progress(steps, start=…)` daje te same stany zrzutom ekranu. Testy budują `Services` bezpośrednio z
 atrapami (`tests/ui/conftest.py`), `tools/screenshots.py` przez `Services.create(dry_run=True)`
 i `dataclasses.replace`. Ustawienia (`ui/theme`) w `QSettings` przekazanym do `MainWindow`
 (aplikacja: domyślne `QSettings`; testy: plik ini w `tmp_path`).

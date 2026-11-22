@@ -63,8 +63,11 @@ wyłącza opóźnienia, `WINSTALLER_FAKE_UPDATE=2.0.1` symuluje dostępną aktua
   (`updates.scan_windows_updates()`) i odczyt kolejki Store (`updates.list_store_queue()`);
   w testach `monkeypatch` `updates.run_powershell` / `start_background` / `mutex_exists` /
   `run_store_cli` / `log_dir` / `existing_log_dirs` / `create_secure_dir` / `dir_is_trusted` /
-  `process_running` / `verify_background_start`. Katalog logów (`%ProgramData%\Winstaller`)
-  ani jego ACL nie zmieniaj ręcznie; operacje ACL tylko na własnych katalogach testowych.
+  `process_running` / `is_live_powershell` / `process_create_time` / `read_shared` /
+  `system_boot_time` / `verify_background_start`. Postęp instalacji w tle
+  (`read_install_progress`, `find_background_install`) tylko czyta pliki; w UI źródła
+  wstrzykuje `Services` (`find_background_install`, `read_install_progress`, `boot_time`,
+  `clock`, `path_exists`). Katalog logów (`%ProgramData%\Winstaller`) ani jego ACL nie zmieniaj ręcznie; operacje ACL tylko na własnych katalogach testowych.
 - Bezpiecznik `tests/conftest.py` (autouse) blokuje procesy, rejestr, sieć, ShellExecute itp.
   we wszystkich testach — nie osłabiaj go. Testy UI dodatkowo (`tests/ui/conftest.py`)
   blokują `QDesktopServices.openUrl`, modalne dialogi i domyślne `QSettings` w rejestrze.

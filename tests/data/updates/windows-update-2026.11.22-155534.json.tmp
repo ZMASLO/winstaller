@@ -1,0 +1,60 @@
+{
+    "winstaller":  "wu-install",
+    "state":  "finished",
+    "pid":  9968,
+    "started":  "2026-11-22T15:55:34.3243327+01:00",
+    "finished":  "2026-11-22T16:04:22.6979818+01:00",
+    "rebootRequired":  true,
+    "exitCode":  0,
+    "error":  null,
+    "updates":  [
+                    {
+                        "id":  "3383a48e-6a94-4186-8bc6-1c581eaaf747",
+                        "revision":  200,
+                        "title":  "Aktualizacja analizy zabezpieczeń dla Microsoft Defender Antivirus — KB2267602 (Wersja 1.463.417.0) — Bieżący kanał (ogólna dostępność)",
+                        "result":  "succeeded",
+                        "hresult":  "0x00000000",
+                        "rebootRequired":  false
+                    },
+                    {
+                        "id":  "552a88c9-7495-45c9-b4b6-5666fe5e22b9",
+                        "revision":  2,
+                        "title":  "Hewlett-Packard  - Other hardware, Printer - Null Print - HP Officejet Pro 6230",
+                        "result":  "succeeded",
+                        "hresult":  "0x00000000",
+                        "rebootRequired":  false
+                    },
+                    {
+                        "id":  "d2090f44-1445-423f-b574-5fb25bee43e6",
+                        "revision":  1,
+                        "title":  "Apple, Inc. USBDevice Driver Update (552.0.0.0)",
+                        "result":  "succeeded",
+                        "hresult":  "0x00000000",
+                        "rebootRequired":  false
+                    },
+                    {
+                        "id":  "702e6ed7-4f31-4f3b-9f49-de333467baf8",
+                        "revision":  1,
+                        "title":  "Microsoft Corporation AudioProcessingObject Driver Update (1.0.4.55794)",
+                        "result":  "succeeded",
+                        "hresult":  "0x00000000",
+                        "rebootRequired":  false
+                    },
+                    {
+                        "id":  "71ab9cfc-4bdf-48b7-b7ad-7f4ce4605cd7",
+                        "revision":  1,
+                        "title":  "2026-11 Aktualizacja wersji Preview (KB5132057) (26300.10075)",
+                        "result":  "succeeded",
+                        "hresult":  "0x00000000",
+                        "rebootRequired":  true
+                    },
+                    {
+                        "id":  "9e5d0dcd-ff37-4266-a310-a874988f9bd0",
+                        "revision":  1,
+                        "title":  "2026-11 Aktualizacja wersji Preview platformy .NET Framework w wersji (KB5137006)",
+                        "result":  "succeeded",
+                        "hresult":  "0x00000000",
+                        "rebootRequired":  true
+                    }
+                ]
+}

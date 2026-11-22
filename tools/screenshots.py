@@ -18,6 +18,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Must happen before any Qt import.
@@ -37,6 +38,7 @@ from PySide6.QtCore import QEventLoop, QPoint, QRect  # noqa: E402
 from PySide6.QtGui import QColor, QPainter, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from winstaller.core import updates  # noqa: E402
 from winstaller.core.actions import ActionContext, ActionOutcome  # noqa: E402
 from winstaller.core.catalog import Item  # noqa: E402
 from winstaller.core.runner import (  # noqa: E402
@@ -45,9 +47,15 @@ from winstaller.core.runner import (  # noqa: E402
     TaskRunner,
     make_dry_run_executor,
 )
+from winstaller.core.updates import InstallProgress  # noqa: E402
 from winstaller.ui.app import create_application  # noqa: E402
 from winstaller.ui.main_window import MainWindow  # noqa: E402
-from winstaller.ui.services import ConfirmRequest, Services, _fake_check  # noqa: E402
+from winstaller.ui.services import (  # noqa: E402
+    ConfirmRequest,
+    Services,
+    _fake_check,
+    simulated_progress,
+)
 from winstaller.ui.theme import ThemeManager, ThemeMode  # noqa: E402
 from winstaller.ui.widgets.confirm_dialog import ConfirmDialog  # noqa: E402
 
@@ -317,6 +325,206 @@ def scene_updates(out: Path, mode: ThemeMode, prefix: str = "") -> None:
     close(w)
 
 
+# ------------------------------------------------- background Windows Update
+
+BG_START = datetime(2026, 11, 22, 15, 55, 34).astimezone()
+BG_STEP = 60.0  # one simulated step = 1 minute (readable clocks on the shots)
+REAL_SAMPLE = REPO_ROOT / "tests" / "data" / "updates" / "windows-update-2026.11.22-155534.json"
+
+
+def bg_state(steps: float) -> InstallProgress:
+    return simulated_progress(
+        steps,
+        start=BG_START,
+        path=updates.DRY_RUN_LOG_PATH.with_suffix(".json"),
+        step_seconds=BG_STEP,
+    )
+
+
+def bg_failed() -> InstallProgress:
+    done = bg_state(100)
+    items = list(done.items)
+    items[1] = replace(items[1], status="failed", hresult="0x80240022", reboot_required=False)
+    items[3] = replace(items[3], status="not_downloaded", hresult="0x80246008")
+    return replace(done, items=tuple(items), exit_code=2)
+
+
+def bg_services(state: InstallProgress | None, *, at: float, found=None, **kw: object):
+    """Dry-run services whose background source always returns ``state``."""
+    services = base_services(**kw)
+    services.read_install_progress = (lambda _p: state) if state is not None else None
+    services.find_background_install = lambda: found
+    services.boot_time = lambda: BG_START - timedelta(hours=4)
+    services.clock = lambda: BG_START + timedelta(seconds=at * BG_STEP)
+    services.path_exists = lambda _p: True  # the logs of these states are fictional
+    return services
+
+
+def real_stale_sample() -> InstallProgress:
+    """Today's real run (fixture): status stuck on "running", result from the log."""
+    text = REAL_SAMPLE.read_bytes().decode("utf-8-sig")
+    return updates._stale(updates.parse_install_status(text, path=REAL_SAMPLE))
+
+
+def run_windows_update(w: MainWindow, extra: tuple[str, ...] = ()) -> None:
+    w.selection.select_many(["windows-update", *extra])
+    w.start_install()
+    wait_until(lambda: w.run_page.bg_panel.isVisible())
+
+
+def scene_background(out: Path, mode: ThemeMode, prefix: str = "") -> None:
+    # 1. downloading, queue still running (7-Zip parked mid-download)
+    services = bg_services(bg_state(2.4), at=2.4)
+    gate = threading.Event()
+    services.runner_factory = gated_runner(services, "7zip", gate)
+    w = make_window(services, mode)
+    run_windows_update(w, ("7zip",))
+    wait_until(lambda: str(w.run_page.model.row_for("7zip").status) == "running")
+    pump(120)
+    if not prefix:
+        save(w, out, "20_w_tle_pobieranie_kolejka")
+    gate.set()
+    wait_until(lambda: w.run.last_summary is not None)
+    close(w)
+
+    # 2. installing the cumulative update (long step), queue finished
+    w = make_window(bg_services(bg_state(6.3), at=6.3), mode)
+    run_windows_update(w)
+    wait_until(lambda: w.run.last_summary is not None)
+    pump(80)
+    save(w, out, f"{prefix}21_w_tle_instalacja")
+    close(w)
+
+    # 3. finished, restart required
+    w = make_window(bg_services(bg_state(100), at=100), mode)
+    run_windows_update(w)
+    wait_until(lambda: w.run.last_summary is not None and w.wu_banner.isVisible())
+    pump(80)
+    save(w, out, f"{prefix}22_w_tle_restart")
+    # banner + nav badge from another page
+    w.navigate("apps")
+    save(w, out, f"{prefix}26_baner_inna_strona")
+    close(w)
+
+    if prefix:
+        return
+    # 4. finished with errors
+    w = make_window(bg_services(bg_failed(), at=100), mode)
+    run_windows_update(w)
+    wait_until(lambda: w.run.last_summary is not None and w.wu_banner.isVisible())
+    pump(80)
+    save(w, out, "23_w_tle_bledy")
+    close(w)
+
+    # 5. program reopened, empty queue: today's real stale run (result from the log)
+    sample = real_stale_sample()
+    w = make_window(bg_services(None, at=100, found=sample), mode)
+    w.start_background_tasks()
+    wait_until(lambda: w.bg_updates.progress is not None)
+    if not prefix:
+        save(w, out, "24a_baner_po_otwarciu")
+    w.navigate("run")
+    save(w, out, "24_w_tle_po_otwarciu_wg_logu")
+    close(w)
+
+    # 6. program reopened while the installation still runs (empty queue)
+    running = bg_state(3.5)
+    w = make_window(bg_services(running, at=3.5, found=running), mode)
+    w.start_background_tasks()
+    wait_until(lambda: w.bg_updates.progress is not None)
+    w.navigate("run")
+    save(w, out, "25_w_tle_trwa_pusta_kolejka")
+
+    # 7. closing the window while it runs
+    request = ConfirmRequest(
+        title="Zamknąć Winstaller?",
+        message=w._background_note(),
+        accept_text="Zamknij",
+        reject_text="Anuluj",
+    )
+    save(compose_dialog(w, request), out, "27_zamykanie_w_tle")
+    close(w)
+
+    # 8. live installer, current step without progress for over 90 minutes
+    stuck = bg_state(4.5)
+    w = make_window(bg_services(stuck, at=4.0 + 95), mode)
+    run_windows_update(w)
+    wait_until(lambda: w.run.last_summary is not None)
+    pump(80)
+    save(w, out, "28_w_tle_brak_postepu")
+    close(w)
+
+    # 9. nothing to install
+    empty = replace(
+        bg_state(100),
+        items=(),
+        total=0,
+        download_total=0,
+        download_current=0,
+        current=0,
+        reboot_required=False,
+    )
+    w = make_window(bg_services(empty, at=100), mode)
+    run_windows_update(w)
+    wait_until(lambda: w.wu_banner.isVisible())
+    save(w, out, "29_w_tle_brak_aktualizacji")
+    close(w)
+
+    # 10. the followed status file is lost (series of failed reads)
+    from winstaller.ui.bridge import BackgroundUpdateMonitor
+
+    limit = BackgroundUpdateMonitor.MAX_FAILURES
+    BackgroundUpdateMonitor.MAX_FAILURES = 2
+    try:
+        state = {"value": bg_state(5.5)}
+
+        def flaky(_path: Path) -> InstallProgress:
+            if state["value"] is None:
+                raise updates.UpdatesError("Nie znaleziono pliku.", kind="format")
+            return state["value"]
+
+        services = bg_services(None, at=5.5)
+        services.read_install_progress = flaky
+        services.background_poll_ms = 50
+        w = make_window(services, mode)
+        run_windows_update(w)
+        wait_until(lambda: w.bg_updates.progress is not None)
+        state["value"] = None
+        wait_until(lambda: w.bg_updates.progress.state == "unknown")
+        save(w, out, "30_w_tle_stan_utracony")
+        close(w)
+    finally:
+        BackgroundUpdateMonitor.MAX_FAILURES = limit
+
+    # 11. a result from another day (program reopened next day, no restart in between)
+    old = real_stale_sample()
+    services = bg_services(None, at=100, found=old)
+    services.clock = lambda: (old.finished or BG_START) + timedelta(days=1)
+    services.boot_time = lambda: (old.started or BG_START) - timedelta(days=2)
+    w = make_window(services, mode)
+    w.start_background_tasks()
+    wait_until(lambda: w.bg_updates.progress is not None)
+    w.navigate("run")
+    save(w, out, "31_w_tle_wynik_z_data")
+    close(w)
+
+
+def compose_dialog(w: MainWindow, request: ConfirmRequest) -> QPixmap:
+    dialog = ConfirmDialog(request, w)
+    dialog.adjustSize()
+    dialog.resize(560, dialog.sizeHint().height())
+    pump()
+    composed = QPixmap(w.grab())
+    dlg = dialog.grab()
+    p = QPainter(composed)
+    p.fillRect(QRect(QPoint(0, 0), w.size()), QColor(0, 0, 0, 150))
+    pos = QPoint((w.width() - dialog.width()) // 2, (w.height() - dialog.height()) // 2)
+    p.drawPixmap(pos, dlg)
+    p.end()
+    dialog.deleteLater()
+    return composed
+
+
 SCENES: dict[str, Callable[[Path, ThemeMode, str], None]] = {
     "apps": scene_apps,
     "run": scene_run,
@@ -327,8 +535,9 @@ SCENES: dict[str, Callable[[Path, ThemeMode, str], None]] = {
     "confirm": scene_confirm,
     "drivers": scene_drivers,
     "updates": scene_updates,
+    "background": scene_background,
 }
-LIGHT_SCENES = ("apps", "run", "about", "tools", "updates")
+LIGHT_SCENES = ("apps", "run", "about", "tools", "updates", "background")
 
 
 def scale_variant(out: Path, scale: str) -> None:

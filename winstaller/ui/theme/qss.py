@@ -141,9 +141,12 @@ QFrame#banner {
     border-left: 3px solid $accent_fg;
 }
 QFrame#banner[tone="error"] { border-left: 3px solid $error; }
+QFrame#banner[tone="neutral"] { border-left: 3px solid $border_strong; }
 QFrame#toolCard, QFrame#summaryPanel, QFrame#infoPanel {
     background: $surface; border: 1px solid $border; border-radius: 0;
 }
+QFrame#wuPanelRestart { background: transparent; border: 1px solid $border_strong; }
+QProgressBar[tone="muted"]::chunk { background: $muted; }
 QFrame#toolResult { background: transparent; border: none; border-top: 1px solid $border; }
 QDialog#confirmDialog { background: $bg; border: 1px solid $border_strong; }
 QFrame#dialogList { background: $surface; border: 1px solid $border; }

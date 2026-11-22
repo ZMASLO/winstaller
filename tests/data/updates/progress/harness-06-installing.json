@@ -1,0 +1,46 @@
+{
+    "winstaller":  "wu-install",
+    "state":  "running",
+    "phase":  "installing",
+    "pid":  25272,
+    "started":  "2026-11-22T16:50:37.6687261+01:00",
+    "finished":  null,
+    "phaseStarted":  "2026-11-22T16:50:37.7983202+01:00",
+    "total":  3,
+    "current":  1,
+    "downloadTotal":  2,
+    "downloadCurrent":  2,
+    "currentTitle":  "2026-11 Aktualizacja wersji Preview (KB5132057) (26300.10075)",
+    "rebootRequired":  false,
+    "exitCode":  null,
+    "error":  null,
+    "log":  "C:\\Temp\\winstaller-test\\h.log",
+    "updates":  [
+                    {
+                        "id":  "71ab9cfc-4bdf-48b7-b7ad-7f4ce4605cd7",
+                        "revision":  1,
+                        "title":  "2026-11 Aktualizacja wersji Preview (KB5132057) (26300.10075)",
+                        "status":  "installing",
+                        "hresult":  "0x00000000",
+                        "rebootRequired":  false
+                    },
+                    {
+                        "id":  "552a88c9-7495-45c9-b4b6-5666fe5e22b9",
+                        "revision":  2,
+                        "title":  "Hewlett-Packard  - Other hardware",
+                        "status":  "downloaded",
+                        "hresult":  null,
+                        "rebootRequired":  false
+                    },
+                    {
+                        "id":  "d2090f44-1445-423f-b574-5fb25bee43e6",
+                        "revision":  1,
+                        "title":  "Apple, Inc. USBDevice Driver Update (552.0.0.0)",
+                        "status":  "not_downloaded",
+                        "hresult":  "0x8024001E",
+                        "rebootRequired":  false
+                    }
+                ],
+    "updated":  "2026-11-22T16:50:37.7983202+01:00",
+    "stepStarted":  "2026-11-22T16:50:37.7983202+01:00"
+}

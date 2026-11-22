@@ -12,6 +12,7 @@ Rules enforced here:
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 import threading
 import time
@@ -31,9 +32,12 @@ from winstaller.core.runner import (
     TaskStatus,
 )
 from winstaller.core.updater import UpdateCancelled, UpdateCheck, UpdateError
+from winstaller.core.updates import LOST_MESSAGE, InstallProgress
 from winstaller.ui.services import Services
 
 FLUSH_MS = 40
+#: Queue item that starts the background Windows Update installation.
+WINDOWS_UPDATE_ID = "windows-update"
 MAX_LOG_LINES = 5000
 QUEUED = Qt.ConnectionType.QueuedConnection
 
@@ -537,6 +541,170 @@ class UpdateController(QObject):
             on_error=lambda exc: self._log.info(f"Sprzątanie po aktualizacji: {exc}"),
             name="winstaller-cleanup-old",
         )
+
+
+# ===================================================== background Windows Update
+
+
+class BackgroundUpdateMonitor(QObject):
+    """Follows the detached Windows Update installation through its status file.
+
+    Polls (``Services.background_poll_ms``) only while there is something to follow:
+    after a ``windows-update`` queue item finished OK with a log (:meth:`track_result`)
+    or when :meth:`detect` found a running installation at start-up; stops at a final
+    state. Each read runs on a worker thread (``Services.read_install_progress`` may
+    retry for a fraction of a second while the script renames over the file).
+    ``changed(InstallProgress)`` is emitted only when the snapshot differs.
+    """
+
+    changed = Signal(object)
+    #: Consecutive failed reads after which polling stops (the file is gone for good).
+    MAX_FAILURES = 60
+
+    def __init__(self, services: Services, log: LogStore, parent: QObject | None = None):
+        super().__init__(parent)
+        self._services = services
+        self._log = log
+        self._timer = QTimer(self)
+        self._timer.setInterval(max(50, services.background_poll_ms))
+        self._timer.timeout.connect(self._poll)
+        self._path: Path | None = None
+        self._job: Job | None = None
+        self._failures = 0
+        # Plain Python object captured by worker callbacks: a result arriving after the
+        # window closed must not touch this QObject.
+        self._closed = threading.Event()
+        self.progress: InstallProgress | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return self._services.read_install_progress is not None
+
+    @property
+    def polling(self) -> bool:
+        return self._timer.isActive()
+
+    @property
+    def status_path(self) -> Path | None:
+        return self._path
+
+    @property
+    def running(self) -> bool:
+        """The installation is (as far as we know) still working."""
+        return self.progress is not None and not self.progress.done
+
+    def track(self, status_path: Path) -> bool:
+        """Follow ``status_path`` from now on (replaces whatever was followed)."""
+        if not self.enabled or self._closed.is_set():
+            return False
+        self._path = status_path
+        self._failures = 0
+        self._timer.start()
+        self._poll()
+        return True
+
+    def track_result(self, result: TaskResult) -> bool:
+        """After a queue item: a ``windows-update`` that ended OK with a log artifact
+        started (or found) a background installation; its status file is next to it.
+        CANCELLED with a log too: the wait for the start confirmation was interrupted,
+        but the installation may have started - the status file tells."""
+        artifact = result.artifact
+        if (
+            result.item_id != WINDOWS_UPDATE_ID
+            or result.status not in (TaskStatus.OK, TaskStatus.CANCELLED)
+            or artifact is None
+            or artifact.suffix.lower() != ".log"
+        ):
+            return False
+        return self.track(artifact.with_suffix(".json"))
+
+    def detect(self, is_hidden: Callable[[InstallProgress], bool] = lambda _p: False) -> bool:
+        """Start-up check (worker thread): a running installation is followed; one that
+        finished after the last system start and is not ``is_hidden`` is shown."""
+        fn = self._services.find_background_install
+        if fn is None or self._closed.is_set():
+            return False
+        closed = self._closed
+        run_job(
+            lambda _report: fn(),
+            on_done=lambda p: None if closed.is_set() else self._detected(p, is_hidden),
+            on_error=lambda exc: None if closed.is_set() else self._detect_failed(exc),
+            name="winstaller-wu-detect",
+        )
+        return True
+
+    def stop(self) -> None:
+        self._closed.set()
+        self._timer.stop()
+
+    # -- internals (GUI thread)
+    def _detected(self, progress: InstallProgress | None, is_hidden) -> None:  # type: ignore[no-untyped-def]
+        if progress is None or self._path is not None:
+            return  # nothing found, or this session already follows an installation
+        if progress.done:
+            if not self._recent(progress) or is_hidden(progress):
+                return
+            self._set(progress)
+            return
+        self._set(progress)
+        if progress.status_path is not None:
+            self.track(progress.status_path)
+
+    def _detect_failed(self, exc: BaseException) -> None:
+        self._log.info(f"Nie udało się sprawdzić instalacji aktualizacji w tle: {exc}")
+
+    def _recent(self, progress: InstallProgress) -> bool:
+        boot = self._services.boot_time
+        when = progress.reference_time
+        if boot is None or when is None:
+            return True
+        try:
+            return when >= boot()
+        except (OSError, ValueError, TypeError, OverflowError):
+            return True
+
+    def _poll(self) -> None:
+        fn = self._services.read_install_progress
+        path = self._path
+        if fn is None or path is None or (self._job is not None and self._job.running):
+            return
+        closed = self._closed
+        self._job = run_job(
+            lambda _report: fn(path),
+            on_done=lambda p: None if closed.is_set() else self._read_done(path, p),
+            on_error=lambda exc: None if closed.is_set() else self._read_failed(path, exc),
+            name="winstaller-wu-poll",
+        )
+
+    def _read_done(self, path: Path, progress: InstallProgress) -> None:
+        if path != self._path:
+            return  # a result for a file we no longer follow
+        self._failures = 0
+        self._set(progress)
+        if progress.done:
+            self._timer.stop()
+
+    def _read_failed(self, path: Path, exc: BaseException) -> None:
+        if path != self._path:
+            return
+        self._failures += 1
+        if self._failures == 1:
+            self._log.info(f"Nie udało się odczytać stanu instalacji aktualizacji w tle: {exc}")
+        if self._failures >= self.MAX_FAILURES:
+            self._timer.stop()
+            last = self.progress
+            if last is not None and not last.done:
+                # The file is gone for good: a final "unknown", never a frozen "in progress".
+                self._set(
+                    dataclasses.replace(
+                        last, state="unknown", error=LOST_MESSAGE, alive=False, current_title=""
+                    )
+                )
+
+    def _set(self, progress: InstallProgress) -> None:
+        if progress != self.progress:
+            self.progress = progress
+            self.changed.emit(progress)
 
 
 # ================================================================= winget

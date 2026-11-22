@@ -429,7 +429,9 @@ def test_status_writes_are_atomic_and_refuse_existing_temp() -> None:
     save = save[: save.index("function Invoke-WindowsUpdate")]
     assert save.index("[IO.File]::Delete($tmp)") < save.index("[IO.FileMode]::CreateNew")
     assert "[IO.FileShare]::None" in save
-    assert "[IO.File]::Replace($tmp, $StatusPath, $null)" in save
+    # $null for a string parameter arrives as '' ("invalid path"): seen on real hardware.
+    assert "[IO.File]::Replace($tmp, $StatusPath, [NullString]::Value)" in save
+    assert "Replace($tmp, $StatusPath, $null)" not in save
     assert "[IO.File]::Move($tmp, $StatusPath)" in save
     assert save.index("try {") < save.index("} catch {")
 

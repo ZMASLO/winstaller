@@ -7,23 +7,26 @@ tests construct :class:`Services` directly or override single fields with
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 import tempfile
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import QWidget
 
 from winstaller.core import platform as plat
-from winstaller.core import updater, winget
+from winstaller.core import updater, updates, winget
 from winstaller.core.catalog import Catalog, load_catalog
 from winstaller.core.platform import Arch
 from winstaller.core.runner import DryRunConfig, RunnerListener, TaskRunner
 from winstaller.core.updater import ReleaseAsset, ReleaseInfo, UpdateCancelled, UpdateCheck
+from winstaller.core.updates import InstallItem, InstallProgress, WindowsUpdateInfo
 from winstaller.core.version import get_version
 from winstaller.core.winget import WingetResult
 
@@ -50,6 +53,14 @@ class ConfirmRequest:
 
 
 ConfirmFn = Callable[[QWidget, ConfirmRequest], bool]
+FindInstallFn = Callable[[], InstallProgress | None]
+ReadInstallFn = Callable[[Path], InstallProgress]
+ClockFn = Callable[[], datetime]
+
+
+def local_now() -> datetime:
+    """Timezone-aware local time (the status file's timestamps are aware)."""
+    return datetime.now().astimezone()
 
 
 @dataclass(slots=True)
@@ -76,6 +87,16 @@ class Services:
     confirm: ConfirmFn | None = None
     auto_check_updates: bool = True
     check_winget_on_start: bool = True
+    #: Background Windows Update installation ("W tle" block). ``None`` = not followed:
+    #: no detection at start-up / no status file reading after the queue item.
+    find_background_install: FindInstallFn | None = None
+    read_install_progress: ReadInstallFn | None = None
+    #: Last system start ("recently finished" = finished after it); None = no limit.
+    boot_time: ClockFn | None = None
+    clock: ClockFn = local_now
+    background_poll_ms: int = 1000
+    #: "Otwórz log" is offered only for an existing file.
+    path_exists: Callable[[Path], bool] = Path.exists
 
     @classmethod
     def create(
@@ -131,6 +152,10 @@ class Services:
                 services.download_update = _fake_download(config.delay)
                 services.update_dest = lambda asset: Path(tempfile.gettempdir()) / asset.name
             services.cleanup_old = lambda: True
+            simulation = SimulatedBackgroundInstall(config.delay)
+            services.read_install_progress = simulation.read
+            services.find_background_install = lambda: None
+            services.boot_time = lambda: local_now() - timedelta(hours=1)
         else:
             services.ensure_winget = _real_ensure_winget
             services.check_update = lambda: updater.check(arch=arch)
@@ -138,6 +163,9 @@ class Services:
             services.apply_update = lambda path: updater.apply(path, args=sys.argv[1:])
             services.update_dest = _update_destination
             services.cleanup_old = lambda: updater.cleanup_old(wait=10.0)
+            services.find_background_install = updates.find_background_install
+            services.read_install_progress = updates.read_install_progress
+            services.boot_time = updates.system_boot_time
         return services
 
 
@@ -215,6 +243,130 @@ def _fake_download(delay: float) -> DownloadFn:
         return dest
 
     return download
+
+
+#: Simulated background installation: index of the update already downloaded and how
+#: many steps each installation takes (the cumulative update is the long one).
+_SIM_PREDOWNLOADED = frozenset({2})
+_SIM_INSTALL_STEPS = (3, 1, 1, 1)
+_SIM_STEP_FACTOR = 8  # one simulated step = 8 x WINSTALLER_DRY_RUN_DELAY
+
+
+def simulated_progress(
+    steps: float,
+    *,
+    start: datetime,
+    path: Path | None = None,
+    sample: Sequence[WindowsUpdateInfo] = updates.DRY_RUN_WINDOWS_UPDATES,
+    step_seconds: float = 1.0,
+    pid: int = 4242,
+) -> InstallProgress:
+    """State of the simulated background installation ``steps`` steps after ``start``:
+    1 step search, 1 per download, :data:`_SIM_INSTALL_STEPS` per installation, then
+    finished with a restart required. Pure (no files, no processes); also used by
+    tools/screenshots.py for fixed states."""
+    n = len(sample)
+    statuses = ["downloaded" if i in _SIM_PREDOWNLOADED else "pending" for i in range(n)]
+    downloads = [i for i in range(n) if i not in _SIM_PREDOWNLOADED]
+    reboot = [u.optional and bool(u.kb) for u in sample]  # Preview LCU / .NET
+
+    def at(offset: float) -> datetime:
+        return start + timedelta(seconds=offset * step_seconds)
+
+    def build(**fields: Any) -> InstallProgress:
+        items = tuple(
+            InstallItem(
+                title=u.title,
+                status=statuses[i],  # type: ignore[arg-type]
+                id=u.id,
+                revision=u.revision,
+                hresult="0x00000000" if statuses[i] in updates.ITEM_DONE else None,
+                reboot_required=reboot[i] and statuses[i] == "succeeded",
+            )
+            for i, u in enumerate(sample)
+        )
+        base: dict[str, Any] = {
+            "state": "running",
+            "total": n,
+            "download_total": len(downloads),
+            "items": items,
+            "started": start,
+            "log_path": path.with_suffix(".log") if path else updates.DRY_RUN_LOG_PATH,
+            "status_path": path,
+            "pid": pid,
+            "alive": True,
+        }
+        base.update(fields)
+        return InstallProgress(**base)
+
+    if steps < 1:
+        return build(phase="searching", phase_started=start, updated=start)
+    clock = 1.0
+    for k, i in enumerate(downloads, start=1):
+        if steps < clock + 1:
+            statuses[i] = "downloading"
+            return build(
+                phase="downloading",
+                current=i + 1,
+                download_current=k,
+                current_title=sample[i].title,
+                phase_started=at(1),
+                step_started=at(clock),
+                updated=at(clock),
+            )
+        statuses[i] = "downloaded"
+        clock += 1
+    install_start = clock
+    for i, length in enumerate(_SIM_INSTALL_STEPS[:n]):
+        if steps < clock + length:
+            statuses[i] = "installing"
+            return build(
+                phase="installing",
+                current=i + 1,
+                download_current=len(downloads),
+                current_title=sample[i].title,
+                phase_started=at(install_start),
+                step_started=at(clock),
+                updated=at(clock),
+            )
+        statuses[i] = "succeeded"
+        clock += length
+    return build(
+        state="finished",
+        phase="finished",
+        current=n,
+        download_current=len(downloads),
+        reboot_required=any(reboot),
+        exit_code=0,
+        phase_started=at(install_start),
+        finished=at(clock),
+        updated=at(clock),
+        alive=False,
+    )
+
+
+class SimulatedBackgroundInstall:
+    """Dry-run source for ``Services.read_install_progress``: the first read of a
+    status path starts its timeline, one step lasting ``8 x delay`` seconds (delay 0:
+    finished at once). Thread-safe (the monitor reads on worker threads)."""
+
+    def __init__(self, delay: float, clock: ClockFn = local_now) -> None:
+        self.step_seconds = max(0.0, delay) * _SIM_STEP_FACTOR
+        self._clock = clock
+        self._starts: dict[Path, datetime] = {}
+        self._lock = threading.Lock()
+
+    def read(self, path: Path) -> InstallProgress:
+        now = self._clock()
+        with self._lock:
+            start = self._starts.setdefault(path, now)
+        if self.step_seconds <= 0:
+            steps = math.inf
+        else:
+            steps = (now - start).total_seconds() / self.step_seconds
+        return simulated_progress(
+            steps, start=start, path=path, step_seconds=self.step_seconds or 1.0
+        )
 
 
 def _fake_ensure_winget(delay: float) -> EnsureWingetFn:

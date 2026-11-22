@@ -66,10 +66,22 @@ Sekcja „Aktualizacje” na stronie „System” (obie pozycje są też na pocz
 Ważne:
 
 - Komputer **nie** uruchamia się ponownie sam. Po zakończeniu instalacji może być wymagany
-  restart — zrób go sam, gdy instalacja się skończy (Ustawienia → Windows Update).
-- Postęp instalacji aktualizacji Windows: Ustawienia → Windows Update albo log
-  `C:\ProgramData\Winstaller\logs\windows-update-RRRR.MM.DD-GGMMSS.log` (obok plik `.json` ze
-  statusem). Gdy katalog `C:\ProgramData\Winstaller` istnieje, ale nie jest bezpieczny
+  restart — zrób go sam, gdy Winstaller pokaże „wymagany restart”.
+- **Postęp instalacji aktualizacji Windows widać w Winstallerze**, nie w Ustawieniach
+  (panel Ustawienia → Windows Update instalacji uruchomionej przez Winstaller nie pokazuje):
+  - zakładka **Przebieg**, blok „// W TLE — WINDOWS UPDATE”: co się dzieje teraz
+    („Wyszukiwanie aktualizacji”, „Pobieranie 2 z 5”, „Instalacja 5 z 6”), tytuł bieżącej
+    aktualizacji, czas trwania bieżącego kroku, lista aktualizacji ze statusem każdej, po
+    zakończeniu wynik z liczbami i „wymagany restart”, przycisk „Otwórz log”;
+  - znacznik przy „Przebieg” w menu (`WU 2/5`, potem `WU OK` albo `WU BŁ.`) i baner u góry
+    okna po zakończeniu („Pokaż”, „Otwórz log”, „Ukryj”);
+  - instalacja trwa dalej po zamknięciu Winstallera; po ponownym otwarciu program pokazuje
+    ją znowu (także zakończoną od ostatniego uruchomienia komputera, dopóki nie klikniesz
+    „Ukryj”);
+  - procentu wewnątrz jednej aktualizacji Winstaller nie pokazuje — długi krok (np.
+    instalacja aktualizacji zbiorczej, kilka minut) to migający kursor i licznik czasu.
+- Log: `C:\ProgramData\Winstaller\logs\windows-update-RRRR.MM.DD-GGMMSS.log` (obok plik
+  `.json` ze statusem). Gdy katalog `C:\ProgramData\Winstaller` istnieje, ale nie jest bezpieczny
   (założył go ktoś inny), log trafia do nowego `C:\ProgramData\Winstaller-<losowe>\logs`.
   Ścieżka logu jest zawsze w dzienniku Winstallera.
 - Winstaller sprawdza, czy instalacja w tle naprawdę wystartowała; jeśli proces od razu się

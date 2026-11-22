@@ -55,9 +55,10 @@ class Banner(QFrame):
         progress: tuple[int, int] | None = None,
         busy: bool = False,
     ) -> None:
-        """Replace the whole banner content and show it."""
+        """Replace the whole banner content and show it. ``tone``: "info" (accent: an
+        offer or something in progress), "neutral" (a finished result), "error"."""
         set_prop(self, "tone", tone)
-        set_prop(self.tag, "role", "error" if tone == "error" else "accent")
+        set_prop(self.tag, "role", {"error": "error", "neutral": ""}.get(tone, "accent"))
         self.tag.setText(tag)
         self.message.setText(message)
         self.detail.setText(detail)

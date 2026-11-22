@@ -4,7 +4,8 @@
   updates: regular, optional/Preview and drivers) in PowerShell; then
   :func:`start_windows_update_install` starts a detached, hidden PowerShell process
   that downloads and installs them through the same API and exits. Winstaller never
-  waits for it and never restarts the machine.
+  waits for it and never restarts the machine; it follows it read-only through the
+  status file (:func:`read_install_progress`, :func:`find_background_install`).
 * Microsoft Store: :func:`update_store_apps` asks the Store install service
   (``AppInstallManager.SearchForAllUpdatesAsync``) to find and queue every app update;
   fallback ``store.exe updates --apply``. The service keeps downloading after we return.
@@ -21,11 +22,13 @@ from __future__ import annotations
 import base64
 import contextlib
 import ctypes
+import dataclasses
 import functools
 import html
 import json
 import logging
 import math
+import msvcrt
 import os
 import re
 import secrets
@@ -35,7 +38,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
@@ -77,6 +80,10 @@ ENV_STORE_TIMEOUT = "WINSTALLER_STORE_TIMEOUT"
 
 LOG_PREFIX = "windows-update-"
 TIMESTAMP_FORMAT = "%Y.%m.%d-%H%M%S"  # RRRR.MM.DD-GGMMSS
+
+#: Where the user sees the background installation (Windows Settings does not show an
+#: installation started through the WUA API).
+PROGRESS_HINT = "Postęp: zakładka Przebieg (blok „W tle”)"
 
 STORE_MANUAL_HINT = (
     "Zaktualizuj aplikacje ręcznie: Microsoft Store → Pobrane (Biblioteka) → "
@@ -1316,6 +1323,59 @@ def is_live_powershell(pid: int) -> bool:
     return process_image(pid) == "powershell.exe"
 
 
+def process_create_time(pid: int) -> datetime | None:
+    """Creation time (aware, local) of process ``pid`` (``GetProcessTimes``); ``None``
+    when it cannot be queried."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.GetProcessTimes.argtypes = [ctypes.c_void_p] + [ctypes.c_void_p] * 4
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel32.OpenProcess(0x1000, 0, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        times = [ctypes.c_uint64() for _ in range(4)]
+        if not kernel32.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return None
+        filetime = times[0].value  # 100 ns since 1601-01-01 UTC
+    finally:
+        kernel32.CloseHandle(handle)
+    if not filetime:
+        return None
+    seconds = filetime / 10_000_000 - 11_644_473_600
+    try:
+        return datetime.fromtimestamp(seconds).astimezone()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+#: The installer writes ``started`` itself right after it starts: its process must be
+#: created at most this much before ...
+INSTALLER_START_BEFORE = timedelta(minutes=10)
+#: ... and not after (clock rounding); a later process reuses the PID of a dead one.
+INSTALLER_START_AFTER = timedelta(seconds=60)
+
+
+def is_installer_process(pid: int, started: datetime | None) -> bool:
+    """``pid`` is a live ``powershell.exe`` that can be the installer whose status says
+    ``started``: created during this boot and within [started - 10 min, started + 60 s]
+    (a PID reused by another PowerShell - even Winstaller's own scan - is not it)."""
+    if not is_live_powershell(pid):
+        return False
+    if started is None:
+        return True
+    try:
+        if started < system_boot_time() - timedelta(seconds=5):
+            return False
+    except (OSError, OverflowError, ValueError, AttributeError):
+        pass
+    created = process_create_time(pid)
+    if created is None:
+        return True  # cannot be disproved (the image check passed)
+    return started - INSTALLER_START_BEFORE <= created <= started + INSTALLER_START_AFTER
+
+
 def background_exit_code(pid: int) -> int | None:
     """Exit code of a background process we started (``None``: running or unknown)."""
     for proc in _BACKGROUND:
@@ -1324,14 +1384,67 @@ def background_exit_code(pid: int) -> int | None:
     return None
 
 
+_GENERIC_READ = 0x80000000
+#: FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+_SHARE_ALL = 0x7
+_OPEN_EXISTING = 3
+_FILE_ATTRIBUTE_NORMAL = 0x80
+_INVALID_HANDLE = ctypes.c_void_p(-1).value
+MAX_STATUS_BYTES = 1_000_000
+MAX_LOG_BYTES = 4_000_000
+
+
+def read_shared(path: Path, limit: int) -> bytes:
+    """Up to ``limit + 1`` bytes of ``path``, opened with read/write/delete sharing.
+
+    Python's ``open`` does not share delete access, and ``File.Replace`` in the
+    background script needs it: a status file held open by our reader would make the
+    script's write fail. The script also appends to the log while we read it. Raises
+    ``OSError`` (``FileNotFoundError`` when missing)."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel32.CreateFileW
+    create.argtypes = [
+        ctypes.c_wchar_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+    ]
+    create.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = create(
+        str(path), _GENERIC_READ, _SHARE_ALL, None, _OPEN_EXISTING, _FILE_ATTRIBUTE_NORMAL, None
+    )
+    if not handle or handle == _INVALID_HANDLE:
+        error = ctypes.get_last_error()
+        raise ctypes.WinError(error) if error not in (2, 3) else FileNotFoundError(error, str(path))
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except OSError:
+        kernel32.CloseHandle(handle)
+        raise
+    with os.fdopen(fd, "rb") as fh:
+        return fh.read(limit + 1)
+
+
+def system_boot_time() -> datetime:
+    """Local, timezone-aware time of the last system start (``GetTickCount64``, which
+    keeps counting during sleep; a Fast Startup "shutdown" is a hibernation and does
+    not reset it, a restart does)."""
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetTickCount64.restype = ctypes.c_uint64
+    return datetime.now().astimezone() - timedelta(milliseconds=kernel32.GetTickCount64())
+
+
 def read_status(path: Path) -> dict[str, Any] | None:
     """The background script's status JSON, or ``None`` (missing, partial, garbage)."""
     try:
-        with open(path, "rb") as fh:
-            raw = fh.read(1_000_001)
+        raw = read_shared(path, MAX_STATUS_BYTES)
     except OSError:
         return None
-    if len(raw) > 1_000_000:
+    if len(raw) > MAX_STATUS_BYTES:
         return None
     try:
         data = json.loads(raw.decode("utf-8-sig"))
@@ -1409,7 +1522,7 @@ def running_install() -> BackgroundInstall:
                 and data.get("state") == "running"
                 and isinstance(pid, int)
                 and not isinstance(pid, bool)
-                and is_live_powershell(pid)
+                and is_installer_process(pid, _local_time(data.get("started")))
             ):
                 return BackgroundInstall(
                     log_path=status.with_suffix(".log"),
@@ -1611,6 +1724,729 @@ def start_windows_update_install(
         _last_started = result
         _start_generation += 1
         return result
+
+
+# ------------------------------------------------------------ background install progress
+
+#: "unknown" is a final state: the installation's state cannot be established (status
+#: "running" without a PID and no result in the log, the newest status file unreadable,
+#: the followed status file lost).
+InstallState = Literal["running", "finished", "stale", "unknown"]
+#: "unknown": a status file from before progress was reported (no ``phase`` field).
+InstallPhase = Literal["searching", "downloading", "installing", "finished", "unknown"]
+ItemStatus = Literal[
+    "pending",
+    "downloading",
+    "downloaded",
+    "installing",
+    "succeeded",
+    "succeeded_with_errors",
+    "failed",
+    "aborted",
+    "not_downloaded",
+    "error",
+    "unknown",
+    "skipped",
+]
+ITEM_STATUSES: frozenset[str] = frozenset(ItemStatus.__args__)  # type: ignore[attr-defined]
+ITEM_OK: frozenset[str] = frozenset({"succeeded", "succeeded_with_errors"})
+#: "unknown" (a result code other than 2-5 after a synchronous Install()) counts as a
+#: failure: a false failure is better than a false success.
+ITEM_FAILED: frozenset[str] = frozenset({"failed", "aborted", "not_downloaded", "error", "unknown"})
+#: Finished updates. "skipped" (closed by the script's ``finally``: never got its turn)
+#: is not among them: like "pending" it counts as skipped after the end.
+ITEM_DONE: frozenset[str] = ITEM_OK | ITEM_FAILED
+_PHASES = frozenset({"searching", "downloading", "installing", "finished"})
+_BUSY = frozenset({"downloading", "installing"})
+#: Read attempts of a status file (the script renames over it; a reader may hit the
+#: moment of the rename: "not found" or a sharing violation for microseconds).
+READ_ATTEMPTS = 5
+READ_RETRY_DELAY = 0.05
+#: Newest status files :func:`find_background_install` tries.
+FIND_CANDIDATES = 5
+#: A live installer whose last status write is older than this while its log has newer
+#: lines: its status writes fail, the view is completed from the log.
+LOG_AHEAD = timedelta(minutes=2)
+LOST_MESSAGE = "Nie można odczytać stanu instalacji — sprawdź log."
+
+
+@dataclass(frozen=True, slots=True)
+class InstallItem:
+    """One update of a background installation (from the status file or the log)."""
+
+    title: str
+    status: ItemStatus = "pending"
+    id: str = ""  # lowercase GUID; "" when known only from the log
+    revision: int = 0
+    hresult: str | None = None
+    reboot_required: bool = False
+
+    @property
+    def done(self) -> bool:
+        return self.status in ITEM_DONE
+
+    @property
+    def ok(self) -> bool:
+        return self.status in ITEM_OK
+
+    @property
+    def failed(self) -> bool:
+        return self.status in ITEM_FAILED
+
+
+@dataclass(frozen=True, slots=True)
+class InstallProgress:
+    """Snapshot of the background Windows Update installation.
+
+    ``state``: ``running`` (status says so and, after :func:`read_install_progress`,
+    the process is the live installer: ``alive``), ``finished`` (the script wrote its
+    result), ``stale`` (status says running but the process is gone: it ended without
+    writing the result; ``from_log`` when the result was recovered from the log),
+    ``unknown`` (final: the state cannot be established, ``error`` says why).
+    ``current``/``total``: 1..N in install order; ``download_current``/
+    ``download_total``: the downloads only. ``from_log`` on a running one: the status
+    file lags behind the log and the view comes from the log.
+    """
+
+    state: InstallState
+    phase: InstallPhase = "unknown"
+    total: int = 0
+    current: int = 0
+    current_title: str = ""
+    download_total: int = 0
+    download_current: int = 0
+    items: tuple[InstallItem, ...] = ()
+    reboot_required: bool = False
+    exit_code: int | None = None
+    error: str | None = None
+    started: datetime | None = None
+    finished: datetime | None = None
+    updated: datetime | None = None
+    phase_started: datetime | None = None
+    step_started: datetime | None = None
+    log_path: Path | None = None
+    status_path: Path | None = None
+    pid: int | None = None
+    alive: bool = False
+    from_log: bool = False
+
+    @property
+    def done(self) -> bool:
+        """Nothing more will happen (result written, recovered, lost or unknown)."""
+        return self.state in ("finished", "stale", "unknown")
+
+    @property
+    def ok_count(self) -> int:
+        return sum(1 for i in self.items if i.ok)
+
+    @property
+    def failed_count(self) -> int:
+        """Failed updates; after the end also those caught mid-download/installation."""
+        return sum(1 for i in self.items if i.failed or (self.done and i.status in _BUSY))
+
+    @property
+    def skipped_count(self) -> int:
+        """After the end: updates that never got their turn (pending, downloaded,
+        skipped)."""
+        if not self.done:
+            return 0
+        return sum(1 for i in self.items if not i.done and i.status not in _BUSY)
+
+    @property
+    def count(self) -> int:
+        return max(self.total, len(self.items))
+
+    @property
+    def needs_restart(self) -> bool:
+        """Global flag, or any single update asks for a restart."""
+        return self.reboot_required or any(i.reboot_required for i in self.items)
+
+    @property
+    def succeeded(self) -> bool:
+        """A clean success: ended with exit code 0, nothing failed, nothing left out."""
+        return (
+            self.state in ("finished", "stale")
+            and self.exit_code == 0
+            and self.failed_count == 0
+            and self.skipped_count == 0
+        )
+
+    @property
+    def steps_total(self) -> int:
+        return self.download_total + self.count
+
+    @property
+    def steps_done(self) -> int:
+        """Finished steps (downloads, then installations) for a step progress bar."""
+        if self.done:
+            return self.steps_total
+        if self.phase in ("installing", "finished"):
+            downloads = self.download_total
+            installs = sum(1 for i in self.items if i.done)
+        else:
+            busy = any(i.status == "downloading" for i in self.items)
+            downloads = max(0, self.download_current - (1 if busy else 0))
+            # A failed download is already counted as a finished download step.
+            installs = sum(1 for i in self.items if i.done and i.status != "not_downloaded")
+        return min(self.steps_total, downloads + installs)
+
+    @property
+    def key(self) -> str:
+        """Stable identity of this installation (status file name), e.g. for "hide"."""
+        if self.status_path is not None:
+            return self.status_path.name
+        if self.log_path is not None:
+            return self.log_path.name
+        return ""
+
+    @property
+    def reference_time(self) -> datetime | None:
+        """When it last did something: finished, else last status write, else start."""
+        return self.finished or self.updated or self.started
+
+
+@dataclass(frozen=True, slots=True)
+class InstallLogSummary:
+    """What :func:`parse_install_log` found in a background installation log.
+
+    ``positions[k]``: 1-based position in the status ``updates[]`` of ``items[k]``
+    (the ``[i]`` marker), ``None`` in logs written before the marker. ``phase``,
+    ``current_index``, ``current_title``: the last step started and not finished
+    ("downloading"/"installing"), ``None`` when none is open."""
+
+    exit_code: int | None = None  # last "Koniec (kod N)."
+    items: tuple[InstallItem, ...] = ()
+    positions: tuple[int | None, ...] = ()
+    reboot_required: bool = False
+    pid: int | None = None
+    found: int | None = None
+    started: datetime | None = None
+    finished: datetime | None = None  # time of the "Koniec" line
+    last: datetime | None = None  # time of the last line of ours
+    phase: Literal["downloading", "installing"] | None = None
+    current_index: int | None = None
+    current_title: str = ""
+    download_current: int = 0
+    download_total: int = 0
+
+    @property
+    def ok_count(self) -> int:
+        return sum(1 for i in self.items if i.ok)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for i in self.items if i.failed)
+
+
+def _local_time(value: object) -> datetime | None:
+    """ISO 8601 text -> aware local datetime (naive text is taken as local time)."""
+    if not isinstance(value, str) or not value.strip() or len(value) > 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    try:
+        return parsed.astimezone()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return min(value, 100_000)
+
+
+def _item_from(entry: object) -> InstallItem | None:
+    if not isinstance(entry, dict):
+        return None
+    title = _clean_text(entry.get("title"))
+    if not title:
+        return None
+    raw_id = entry.get("id")
+    update_id = raw_id.strip().lower() if isinstance(raw_id, str) else ""
+    raw_status = entry.get("status", entry.get("result"))  # "result": before 2.0 progress
+    status = raw_status if isinstance(raw_status, str) and raw_status in ITEM_STATUSES else None
+    if status is None:
+        status = "pending" if raw_status is None else "unknown"
+    revision = entry.get("revision")
+    return InstallItem(
+        title=title,
+        status=status,  # type: ignore[arg-type]
+        id=update_id if _GUID.fullmatch(update_id) else "",
+        revision=revision if isinstance(revision, int) and not isinstance(revision, bool) else 0,
+        hresult=format_hresult(hresult_value(entry.get("hresult"))),
+        reboot_required=_bool(entry.get("rebootRequired")),
+    )
+
+
+@_parser
+def parse_install_status(text: str, *, path: Path | None = None) -> InstallProgress:
+    """The background script's status JSON -> :class:`InstallProgress` (pure: ``alive``
+    is always False here, see :func:`read_install_progress`). Accepts files written
+    before progress was reported (no ``phase``/``total``/``status`` fields: ``phase``
+    is then "unknown", item results come from ``result``). Not our JSON, a ``state``
+    other than running/finished, or garbage -> :class:`UpdatesError`."""
+    if not isinstance(text, str) or len(text) > MAX_STATUS_BYTES:
+        raise UpdatesError("Nieprawidłowy plik statusu instalacji.", kind="format")
+    try:
+        data = json.loads(text.lstrip("﻿"))
+    except ValueError:
+        raise UpdatesError(
+            "Plik statusu instalacji nie jest poprawnym JSON-em.", kind="format"
+        ) from None
+    if not isinstance(data, dict) or data.get("winstaller") != "wu-install":
+        raise UpdatesError(FOREIGN_STATUS, kind="format")
+    state = data.get("state")
+    if state not in ("running", "finished"):
+        raise UpdatesError("Nieznany stan w pliku statusu instalacji.", kind="format")
+    raw_items = data.get("updates")
+    if isinstance(raw_items, dict):  # ConvertTo-Json may unroll a one-element array
+        raw_items = [raw_items]
+    if not isinstance(raw_items, list):
+        raw_items = []
+    items = tuple(i for i in (_item_from(e) for e in raw_items[:1000]) if i is not None)
+    phase = data.get("phase")
+    if phase not in _PHASES:
+        phase = "finished" if state == "finished" else "unknown"
+    total = max(_count(data.get("total")), len(items))
+    download_total = _count(data.get("downloadTotal"))
+    pid = data.get("pid")
+    exit_code = data.get("exitCode")
+    error = data.get("error")
+    log_field = data.get("log")
+    if path is not None:
+        log_path: Path | None = path.with_suffix(".log")
+    elif isinstance(log_field, str) and Path(log_field).is_absolute():
+        log_path = Path(log_field)
+    else:
+        log_path = None
+    return InstallProgress(
+        state=state,
+        phase=phase,
+        total=total,
+        current=min(_count(data.get("current")), total),
+        current_title="" if state == "finished" else _clean_text(data.get("currentTitle")),
+        download_total=download_total,
+        download_current=min(_count(data.get("downloadCurrent")), download_total),
+        items=items,
+        reboot_required=_bool(data.get("rebootRequired")),
+        exit_code=exit_code
+        if isinstance(exit_code, int) and not isinstance(exit_code, bool)
+        else None,
+        error=_clean_text(error) or None,
+        started=_local_time(data.get("started")),
+        finished=_local_time(data.get("finished")),
+        updated=_local_time(data.get("updated")),
+        phase_started=_local_time(data.get("phaseStarted")),
+        step_started=_local_time(data.get("stepStarted")),
+        log_path=log_path,
+        status_path=path,
+        pid=pid if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0 else None,
+    )
+
+
+FOREIGN_STATUS = "To nie jest plik statusu instalacji Winstallera."
+
+# Every pattern is anchored on the WHOLE message (after the time stamp): an update
+# title inside one of our lines can never pass for a result, a restart or an end.
+_LOG_LINE = re.compile(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.*)")
+_POS = r"(?: \[(\d{1,5})\])?"  # "[i]": position in updates[] (since the marker exists)
+_LOG_INSTALL = re.compile(rf"Instalacja{_POS}: (.+)")
+_LOG_DOWNLOAD = re.compile(rf"Pobieranie (\d{{1,5}}) z (\d{{1,5}}){_POS}: (.+)")
+_LOG_DOWNLOADED = re.compile(r"-> (pobrano|nie pobrano \(0x[0-9A-Fa-f]{8}\))")
+_LOG_SKIP = re.compile(rf"Nie pobrano, pomijam instalację{_POS}: (.+)")
+_LOG_RESULT = re.compile(
+    r"-> (?:\[(\d{1,5})\] )?(.+?) \((0x[0-9A-Fa-f]{8})\)(: .*|:|, wymaga restartu)?"
+)
+_LOG_END = re.compile(r"Koniec \(kod (-?\d{1,10})\)\.")
+_LOG_START = re.compile(r"Start instalacji aktualizacji w tle \(PID (\d{1,10})\)\.")
+_LOG_FOUND = re.compile(r"Znaleziono (\d{1,6}) aktualizacji\.")
+_LOG_RESTART = (
+    "Aby dokończyć instalację, uruchom ponownie komputer (Winstaller nie robi tego automatycznie)."
+)
+_LOG_RESULT_STATUS: Mapping[str, ItemStatus] = {
+    "OK": "succeeded",
+    "OK z błędami": "succeeded_with_errors",
+    "błąd": "failed",
+    "przerwano": "aborted",
+}
+
+
+def _position(text: str | None) -> int | None:
+    return int(text) if text else None
+
+
+@_parser
+def parse_install_log(text: str) -> InstallLogSummary:
+    """Result of a background installation from its log (pure). Used when the process
+    ended without writing its status (and to catch up a lagging status): the last
+    ``Koniec (kod N).``, every ``Instalacja [i]: <title>`` with its ``-> [i] <result>
+    (0x…)`` line, skipped downloads, the restart notice and the last open step. Lines
+    that are not ours are ignored; non-text input -> :class:`UpdatesError`."""
+    if not isinstance(text, str):
+        raise UpdatesError("Nieprawidłowy log instalacji.", kind="format")
+    items: list[InstallItem] = []
+    positions: list[int | None] = []
+    pending: tuple[str, int | None] | None = None  # an "Instalacja" waiting for its result
+    exit_code: int | None = None
+    reboot = False
+    pid: int | None = None
+    found: int | None = None
+    started: datetime | None = None
+    finished: datetime | None = None
+    last: datetime | None = None
+    download: tuple[str, int | None] | None = None  # an open "Pobieranie"
+    dl_current = dl_total = 0
+
+    def add(title: str, pos: int | None, status: ItemStatus, **fields: Any) -> None:
+        items.append(InstallItem(title, status, **fields))
+        positions.append(pos)
+
+    for raw in text.lstrip("﻿").split("\n"):
+        match = _LOG_LINE.fullmatch(raw.strip())
+        if not match:
+            continue
+        stamp, body = _local_time(match.group(1)), match.group(2).strip()
+        started = started or stamp
+        if m := _LOG_INSTALL.fullmatch(body):
+            if pending is not None:  # no result line: the process died during it
+                add(pending[0], pending[1], "unknown")
+            pending = (_clean_text(m.group(2)) or "?", _position(m.group(1)))
+            download = None
+        elif m := _LOG_DOWNLOAD.fullmatch(body):
+            dl_current, dl_total = int(m.group(1)), int(m.group(2))
+            download = (_clean_text(m.group(4)) or "?", _position(m.group(3)))
+        elif download is not None and _LOG_DOWNLOADED.fullmatch(body):
+            download = None
+        elif m := _LOG_SKIP.fullmatch(body):
+            add(_clean_text(m.group(2)) or "?", _position(m.group(1)), "not_downloaded")
+        elif pending is not None and (m := _LOG_RESULT.fullmatch(body)):
+            pos, word, code, tail = _position(m.group(1)), m.group(2), m.group(3), m.group(4)
+            tail = tail or ""
+            if word == "błąd" and tail.startswith(":"):
+                status: ItemStatus = "error"
+            else:
+                status = _LOG_RESULT_STATUS.get(word, "unknown")
+            restart = tail == ", wymaga restartu"
+            hresult = format_hresult(hresult_value(code))
+            title, opened = pending
+            add(
+                title,
+                opened if pos is None else pos,
+                status,
+                hresult=hresult,
+                reboot_required=restart,
+            )
+            reboot = reboot or restart
+            pending = None
+        elif m := _LOG_END.fullmatch(body):
+            exit_code = int(m.group(1))
+            finished = stamp
+        elif m := _LOG_START.fullmatch(body):
+            pid = int(m.group(1))
+        elif m := _LOG_FOUND.fullmatch(body):
+            found = int(m.group(1))
+        elif body == _LOG_RESTART:
+            reboot = True
+        else:
+            continue
+        last = stamp or last
+    phase: Literal["downloading", "installing"] | None = None
+    current: tuple[str, int | None] | None = None
+    if pending is not None:
+        if exit_code is None:
+            phase, current = "installing", pending
+        add(pending[0], pending[1], "installing" if exit_code is None else "unknown")
+    elif download is not None and exit_code is None:
+        phase, current = "downloading", download
+    return InstallLogSummary(
+        exit_code=exit_code,
+        items=tuple(items),
+        positions=tuple(positions),
+        reboot_required=reboot,
+        pid=pid,
+        found=found,
+        started=started,
+        finished=finished,
+        last=last,
+        phase=phase,
+        current_index=current[1] if current else None,
+        current_title=current[0] if current else "",
+        download_current=dl_current,
+        download_total=dl_total,
+    )
+
+
+def _read_text(path: Path, limit: int, attempts: int = READ_ATTEMPTS) -> str:
+    """Shared read with retries (the script may be renaming over the file right now).
+    Raises :class:`UpdatesError` only."""
+    last: Exception | None = None
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(READ_RETRY_DELAY)
+        try:
+            raw = read_shared(path, limit)
+        except OSError as exc:
+            last = exc
+            continue
+        if len(raw) > limit:
+            raise UpdatesError(f"Plik {path.name} jest zbyt duży.", kind="format")
+        try:
+            return raw.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            last = exc
+    if isinstance(last, FileNotFoundError):
+        raise UpdatesError(f"Nie znaleziono pliku {path}.", kind="format")
+    raise UpdatesError(f"Nie udało się odczytać pliku {path} ({last}).", kind="format")
+
+
+def _read_log(progress: InstallProgress) -> InstallLogSummary | None:
+    """This run's log (``None``: none, unreadable, or another PID's)."""
+    if progress.log_path is None:
+        return None
+    try:
+        summary = parse_install_log(_read_text(progress.log_path, MAX_LOG_BYTES))
+    except UpdatesError:
+        return None
+    if summary.pid is not None and progress.pid is not None and summary.pid != progress.pid:
+        return None
+    return summary
+
+
+def read_install_progress(status_path: Path) -> InstallProgress:
+    """Current state of the installation whose status file is ``status_path``
+    (read-only). ``running`` is confirmed against the process (:func:`is_installer_process`:
+    a live ``powershell.exe`` with that PID, created this boot right before ``started``:
+    ``alive``); a dead one makes it ``stale``, with the result recovered from the log
+    next to the status when the log has it (``from_log``). ``running`` without a PID:
+    the log decides, else ``unknown`` (final). A live installer whose status lags
+    behind its log by more than :data:`LOG_AHEAD` is completed from the log. Never
+    raises anything but :class:`UpdatesError`."""
+    progress: InstallProgress | None = None
+    last: UpdatesError | None = None
+    for attempt in range(READ_ATTEMPTS):
+        if attempt:
+            time.sleep(READ_RETRY_DELAY)
+        try:
+            progress = parse_install_status(
+                _read_text(status_path, MAX_STATUS_BYTES, attempts=1), path=status_path
+            )
+            break
+        except UpdatesError as exc:
+            last = exc
+    if progress is None:
+        raise last or UpdatesError(f"Nie udało się odczytać {status_path}.", kind="format")
+    if progress.state != "running":
+        return progress
+    if progress.pid is None:
+        ended = _stale(progress)
+        if ended.from_log and ended.exit_code is not None:
+            return ended
+        return dataclasses.replace(ended, state="unknown", error=LOST_MESSAGE)
+    try:
+        alive = is_installer_process(progress.pid, progress.started)
+    except OSError:
+        alive = False
+    if not alive:
+        return _stale(progress)
+    return _catch_up(dataclasses.replace(progress, alive=True))
+
+
+def _catch_up(progress: InstallProgress) -> InstallProgress:
+    """A live installer whose status writes fail while the log goes on: take the
+    current step and the finished results from the log (``from_log``)."""
+    updated = progress.updated or progress.started
+    try:
+        if updated is None or datetime.now().astimezone() - updated < LOG_AHEAD:
+            return progress
+    except (TypeError, OverflowError):
+        return progress
+    summary = _read_log(progress)
+    if summary is None or summary.last is None or summary.last - updated < LOG_AHEAD:
+        return progress
+    items = _merge_items(progress.items, summary)
+    if summary.phase is not None and summary.current_index is not None:
+        k = summary.current_index - 1
+        if 0 <= k < len(items) and not items[k].done:
+            status: ItemStatus = "installing" if summary.phase == "installing" else "downloading"
+            items = items[:k] + (dataclasses.replace(items[k], status=status),) + items[k + 1 :]
+    fields: dict[str, Any] = {"items": items, "from_log": True}
+    if summary.phase is not None:
+        fields.update(
+            phase=summary.phase,
+            current_title=summary.current_title,
+            current=summary.current_index or progress.current,
+            step_started=summary.last,
+        )
+        if summary.phase == "downloading":
+            fields.update(
+                download_current=summary.download_current,
+                download_total=max(progress.download_total, summary.download_total),
+            )
+    merged = dataclasses.replace(progress, **fields)
+    return dataclasses.replace(merged, total=max(merged.total, len(items)))
+
+
+def _merge_items(
+    items: tuple[InstallItem, ...], summary: InstallLogSummary
+) -> tuple[InstallItem, ...]:
+    """Results from the log onto the status items: by the ``[i]`` position when the log
+    has it, else by order of appearance (the k-th "Instalacja: T" is the k-th update
+    titled T - updates often share a title, e.g. drivers). Log results that match
+    nothing are appended."""
+    if not items:
+        return summary.items
+    result = list(items)
+    by_title: dict[str, list[int]] = {}
+    for n, item in enumerate(result):
+        by_title.setdefault(item.title, []).append(n)
+    taken: dict[str, int] = {}
+    extra: list[InstallItem] = []
+    for pos, log_item in zip(summary.positions, summary.items, strict=True):
+        if pos is not None and 1 <= pos <= len(result) and result[pos - 1].title == log_item.title:
+            n: int | None = pos - 1
+        else:
+            k = taken.get(log_item.title, 0)
+            taken[log_item.title] = k + 1
+            slots = by_title.get(log_item.title, [])
+            n = slots[k] if k < len(slots) else None
+        if n is None:
+            extra.append(log_item)
+        else:
+            old = result[n]
+            result[n] = dataclasses.replace(
+                log_item, id=old.id, revision=old.revision, title=old.title
+            )
+    return tuple(result) + tuple(extra)
+
+
+def _stale(progress: InstallProgress) -> InstallProgress:
+    stale = dataclasses.replace(progress, state="stale", current_title="")
+    summary = _read_log(progress)
+    if summary is None:
+        return stale
+    items = _merge_items(progress.items, summary)
+    return dataclasses.replace(
+        stale,
+        phase="finished" if summary.exit_code is not None else progress.phase,
+        items=items,
+        total=max(progress.total, len(items)),
+        exit_code=summary.exit_code,
+        reboot_required=progress.reboot_required or summary.reboot_required,
+        finished=summary.finished,
+        from_log=summary.exit_code is not None or bool(summary.items),
+    )
+
+
+def _foreign(path: Path) -> bool:
+    """A JSON file that is clearly not one of our status files (skipped by the finder,
+    unlike an unreadable one)."""
+    try:
+        data = json.loads(_read_text(path, MAX_STATUS_BYTES, attempts=1).lstrip("﻿"))
+    except (UpdatesError, ValueError, RecursionError):
+        return False
+    return not isinstance(data, dict) or data.get("winstaller") != "wu-install"
+
+
+def find_background_install() -> InstallProgress | None:
+    """The newest background installation in the trusted log folders
+    (:func:`existing_log_dirs`), read with :func:`read_install_progress`. Files that
+    are not ours are skipped; when the newest of ours cannot be read, the result is
+    ``unknown`` for it (an older, finished run is never shown in its place). ``None``
+    when there is none. Creates and changes nothing."""
+    candidates: list[Path] = []
+    for folder in existing_log_dirs():
+        try:
+            candidates.extend(folder.glob(f"{LOG_PREFIX}*.json"))
+        except OSError:
+            continue
+    candidates.sort(key=_log_sort_key, reverse=True)
+    for status in candidates[:FIND_CANDIDATES]:
+        if not _STAMP_NAME.fullmatch(status.name):
+            continue
+        try:
+            return read_install_progress(status)
+        except UpdatesError as exc:
+            if _foreign(status):
+                continue
+            return InstallProgress(
+                state="unknown",
+                error=f"{LOST_MESSAGE} ({exc.message.rstrip('.')})",
+                log_path=status.with_suffix(".log"),
+                status_path=status,
+                updated=_mtime(status),
+            )
+    return None
+
+
+def _mtime(path: Path) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def describe_progress(
+    progress: InstallProgress, *, mention_restart: bool = True
+) -> tuple[str, str]:
+    """Short Polish ``(title, subtitle)`` for the UI, e.g. ``("Pobieranie 2 z 5",
+    "<title>")`` or ``("Zakończono — wymagany restart", "Zainstalowano 6 z 6. …")``.
+    ``mention_restart=False``: the subtitle leaves the restart out (shown separately)."""
+    p = progress
+    restart = (
+        " Uruchom ponownie komputer, aby dokończyć instalację."
+        if p.needs_restart and mention_restart
+        else ""
+    )
+    if p.state == "running":
+        note = "Stan wg logu (plik statusu nie jest aktualizowany). " if p.from_log else ""
+        if p.phase == "searching":
+            return "Wyszukiwanie aktualizacji", "Proces w tle ponownie wyszukuje aktualizacje."
+        if p.phase == "downloading":
+            n, total = max(1, p.download_current), max(p.download_total, 1)
+            return f"Pobieranie {n} z {total}", f"{note}{p.current_title}".strip()
+        if p.phase == "installing":
+            title = f"Instalacja {max(1, p.current)} z {max(p.count, 1)}"
+            return title, f"{note}{p.current_title}".strip()
+        return "Instalacja w toku", "Szczegóły w logu."
+    if p.state == "unknown":
+        return "Stan instalacji nieznany", f"{LOST_MESSAGE}{restart}"
+    source = "Wynik odczytany z logu (proces nie zapisał statusu). " if p.from_log else ""
+    if p.state == "stale" and p.exit_code is None:
+        return (
+            "Instalacja przerwana",
+            "Proces w tle zakończył się bez zapisania wyniku (został zamknięty albo komputer "
+            f"uruchomiono ponownie) — sprawdź log.{restart}",
+        )
+    n, ok, failed, skipped = p.count, p.ok_count, p.failed_count, p.skipped_count
+    if p.exit_code in EXIT_MESSAGES and p.exit_code not in (1, 2) and not ok:
+        detail = EXIT_MESSAGES[p.exit_code].rstrip(".")
+        return "Nie zainstalowano aktualizacji", f"{source}{detail} (kod {p.exit_code}).{restart}"
+    if failed or p.exit_code not in (0, None):
+        title = (
+            f"Zakończono z błędami ({failed} z {n} nieudane)"
+            if failed
+            else f"Zakończono z błędem (kod {p.exit_code})"
+        )
+        return title, f"{source}Zainstalowano {ok} z {n}.{restart}".strip()
+    if n == 0:
+        if p.exit_code is None:
+            return (
+                "Zakończono — wynik niepotwierdzony",
+                f"{source}Proces nie podał kodu zakończenia — sprawdź log.{restart}",
+            )
+        return "Zakończono — brak aktualizacji do zainstalowania", f"{source}{restart}".strip()
+    if skipped or p.exit_code is None:
+        rest = f" Pominięte: {skipped}." if skipped else " Proces nie podał kodu zakończenia."
+        return (
+            f"Zakończono niepełne ({ok} z {n} zainstalowano)",
+            f"{source}Zainstalowano {ok} z {n}.{rest}{restart}",
+        )
+    if p.needs_restart:
+        return "Zakończono — wymagany restart", f"{source}Zainstalowano {ok} z {n}.{restart}"
+    return "Zakończono", f"{source}Zainstalowano {ok} z {n}."
 
 
 # ------------------------------------------------------------------ Microsoft Store

@@ -18,7 +18,9 @@ from PySide6.QtWidgets import (
 from winstaller.core.catalog import Availability, CategoryKind, Item
 from winstaller.core.runner import RunSummary, TaskResult, TaskStatus
 from winstaller.core.updater import UpdateCheck
+from winstaller.core.updates import InstallProgress, describe_progress
 from winstaller.ui.bridge import (
+    BackgroundUpdateMonitor,
     LogStore,
     RunController,
     RunState,
@@ -54,17 +56,20 @@ PAGES: list[tuple[str, str]] = [
 ]
 SELECTION_PAGES = ("apps", "system")
 SETTINGS_THEME_KEY = "ui/theme"
+#: Status file name of the background installation whose result banner was hidden.
+SETTINGS_HIDDEN_WU_KEY = "updates/hiddenBackgroundInstall"
 
 
 class MainWindow(QMainWindow):
     """Top-level window. All collaborators come from :class:`Services` (injectable).
 
-    Test hooks: ``selection``, ``log``, ``run``, ``updates``, ``winget``, ``tools``
-    (controllers); ``pages`` (id -> page), ``apps_page``, ``system_page``, ``run_page``,
-    ``tools_page``, ``log_page``, ``about_page``; ``nav``, ``action_bar``,
-    ``update_banner``, ``winget_banner``; methods ``navigate``, ``current_page_id``,
-    ``start_install``, ``stop_run``, ``retry_failed``, ``back_to_selection``,
-    ``start_background_tasks``. Signal ``pageChanged(page_id)``.
+    Test hooks: ``selection``, ``log``, ``run``, ``updates``, ``winget``, ``tools``,
+    ``bg_updates`` (controllers); ``pages`` (id -> page), ``apps_page``, ``system_page``,
+    ``run_page``, ``tools_page``, ``log_page``, ``about_page``; ``nav``, ``action_bar``,
+    ``update_banner``, ``winget_banner``, ``wu_banner``; methods ``navigate``,
+    ``current_page_id``, ``start_install``, ``stop_run``, ``retry_failed``,
+    ``back_to_selection``, ``start_background_tasks``, ``hide_background_result``.
+    Signal ``pageChanged(page_id)``.
     """
 
     pageChanged = Signal(str)
@@ -111,6 +116,9 @@ class MainWindow(QMainWindow):
         self.updates = UpdateController(services, self.log, self)
         self.winget = WingetController(services, self.log, self)
         self.tools = ToolController(services, self.log, self)
+        self.bg_updates = BackgroundUpdateMonitor(services, self.log, self)
+        self._bg_title = ""
+        self._bg_hidden_key = ""  # hidden in this session (see hide_background_result)
 
         # -- pages
         install_cats = catalog.categories(CategoryKind.INSTALL)
@@ -149,7 +157,9 @@ class MainWindow(QMainWindow):
         self.apps_page.jumpRequested.connect(lambda text: self._jump_search("system", text))
         self.system_page.jumpRequested.connect(lambda text: self._jump_search("apps", text))
 
-        self.run_page = RunPage(self.log, self.theme)
+        self.run_page = RunPage(
+            self.log, self.theme, clock=services.clock, path_exists=services.path_exists
+        )
         self.tools_page = ToolsPage(catalog.tools(), dry_run=services.dry_run)
         self.log_page = LogPage(self.log)
         self.about_page = AboutPage(
@@ -186,6 +196,7 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(page)
         self.update_banner = Banner("updateBanner")
         self.winget_banner = Banner("wingetBanner")
+        self.wu_banner = Banner("wuBanner")
         self.action_bar = ActionBar()
         self.action_bar.installRequested.connect(self.start_install)
         self.action_bar.clearRequested.connect(self.selection.clear)
@@ -198,6 +209,7 @@ class MainWindow(QMainWindow):
         rlay.setSpacing(0)
         rlay.addWidget(self.update_banner)
         rlay.addWidget(self.winget_banner)
+        rlay.addWidget(self.wu_banner)
         rlay.addWidget(self.stack, 1)
         rlay.addWidget(self.action_bar)
 
@@ -226,6 +238,8 @@ class MainWindow(QMainWindow):
         self.run_page.retryRequested.connect(self.retry_failed)
         self.run_page.backRequested.connect(self.back_to_selection)
         self.run_page.browseRequested.connect(lambda: self.navigate("apps"))
+        self.run_page.bg_panel.openLogRequested.connect(self._open_background_log)
+        self.bg_updates.changed.connect(self._on_background_progress)
 
         self.tools_page.runRequested.connect(self.run_tool)
         self.tools_page.openRequested.connect(self._open_path)
@@ -276,24 +290,54 @@ class MainWindow(QMainWindow):
             self.updates.check(manual=False)
         if self.services.check_winget_on_start:
             self.winget.check()
+        self.bg_updates.detect(self._background_hidden)
+
+    def _accept_close(self, event: QCloseEvent) -> None:
+        if self.updates.downloading:
+            self.updates.cancel_download()
+        self.winget.cancel()
+        self.bg_updates.stop()
+        event.accept()
+
+    def _background_note(self) -> str:
+        """Sentence for the close question while the background install runs."""
+        progress = self.bg_updates.progress
+        log = progress.log_path if progress is not None else None
+        where = f" Log: {log}" if log is not None else ""
+        return (
+            "Aktualizacje Windows instalują się dalej w tle — zamknięcie Winstallera ich nie "
+            f"przerwie. Postęp zobaczysz po ponownym uruchomieniu programu (Przebieg).{where}"
+        )
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._force_close or not self.run.busy:
-            if self.updates.downloading:
-                self.updates.cancel_download()
-            self.winget.cancel()
-            event.accept()
+        background = self.bg_updates.running
+        if self._force_close or (not self.run.busy and not background):
+            self._accept_close(event)
             return
         if self._close_requested:
             event.ignore()
             return
+        if not self.run.busy:
+            if self._confirm(
+                ConfirmRequest(
+                    title="Zamknąć Winstaller?",
+                    message=self._background_note(),
+                    accept_text="Zamknij",
+                    reject_text="Anuluj",
+                )
+            ):
+                self._accept_close(event)
+            else:
+                event.ignore()
+            return
+        message = (
+            "Kolejka jest w toku. Bieżący proces zostanie zatrzymany, a pozostałe "
+            "zadania anulowane. Okno zamknie się po zatrzymaniu."
+        )
         ok = self._confirm(
             ConfirmRequest(
                 title="Przerwać instalację i zamknąć?",
-                message=(
-                    "Kolejka jest w toku. Bieżący proces zostanie zatrzymany, a pozostałe "
-                    "zadania anulowane. Okno zamknie się po zatrzymaniu."
-                ),
+                message=f"{message}\n\n{self._background_note()}" if background else message,
                 accept_text="Zatrzymaj i zamknij",
                 reject_text="Kontynuuj instalację",
             )
@@ -425,6 +469,7 @@ class MainWindow(QMainWindow):
     def _on_run_state(self, state: RunState) -> None:
         self.selection.set_locked(self.run.busy)
         self.tools_page.set_locked(self.run.busy)
+        self.run_page.bg_panel.set_secondary(self.run.busy)
         self._refresh_selection_ui()
         self._refresh_run_badge()
 
@@ -438,6 +483,8 @@ class MainWindow(QMainWindow):
     def _on_task_finished(self, result: TaskResult) -> None:
         self.run_page.task_finished(result)
         self._refresh_run_badge()
+        if self.bg_updates.track_result(result):
+            self.log.info("Śledzenie instalacji aktualizacji Windows w tle (Przebieg → W tle).")
 
     def _on_run_finished(self, summary: RunSummary) -> None:
         self.run_page.finish(summary)
@@ -474,6 +521,116 @@ class MainWindow(QMainWindow):
             self.nav.set_badge("run", f"{failed} BŁ.", "error")
         else:
             self.nav.set_badge("run", f"{done}/{total}", "muted")
+        self._refresh_background_badge()
+
+    # ------------------------------------------------- background Windows Update
+    def _refresh_background_badge(self) -> None:
+        p = self.bg_updates.progress
+        if p is None or (p.done and self._background_hidden(p)):
+            self.nav.set_extra_badge("run", "")
+            return
+        if p.state == "unknown":
+            text, tone = "WU ?", "error"
+        elif p.done:
+            text, tone = ("WU OK", "text") if p.succeeded else ("WU BŁ.", "error")
+        else:
+            if p.phase == "downloading":
+                step = f"{max(1, p.download_current)}/{p.download_total}"
+            elif p.phase == "installing":
+                step = f"{max(1, p.current)}/{p.count}"
+            else:
+                step = "…"
+            # Yellow means "the one thing in progress": the queue has it while it runs.
+            text, tone = f"WU {step}", "muted" if self.run.busy else "accent"
+        self.nav.set_extra_badge("run", text, tone)
+
+    def _on_background_progress(self, progress: InstallProgress) -> None:
+        hidden = progress.done and self._background_hidden(progress)
+        self.run_page.bg_panel.set_progress(None if hidden else progress)
+        self._refresh_background_badge()
+        title, subtitle = describe_progress(progress)
+        if title != self._bg_title:
+            self._bg_title = title
+            self.log.info(f"Windows Update w tle: {title}" + (f" — {subtitle}" if subtitle else ""))
+        if progress.done and not hidden:
+            self._show_background_result(progress)
+
+    def _background_hidden(self, progress: InstallProgress) -> bool:
+        if not progress.key:
+            return False
+        if progress.key == self._bg_hidden_key:
+            return True
+        if self.settings is None:
+            return False
+        return str(self.settings.value(SETTINGS_HIDDEN_WU_KEY, "")) == progress.key
+
+    def _show_background_result(self, progress: InstallProgress) -> None:
+        n, ok, failed, skipped = (
+            progress.count,
+            progress.ok_count,
+            progress.failed_count,
+            progress.skipped_count,
+        )
+        parts = [f"Zainstalowano {ok} z {n}"] if n else []
+        if failed:
+            parts.append(f"nieudane: {failed}")
+        if skipped:
+            parts.append(f"pominięte: {skipped}")
+        if progress.state == "unknown" or (progress.exit_code not in (0, 2, None) and not ok):
+            _title, reason = describe_progress(progress, mention_restart=False)
+            parts = [reason.rstrip(".")]
+        if progress.from_log:
+            parts.append("wynik odczytany z logu")
+        detail = " · ".join(parts)
+        restart = " — uruchom ponownie komputer" if progress.needs_restart else ""
+        if progress.state == "unknown":
+            message, tone, tag = "Stan instalacji aktualizacji Windows nieznany", "error", "[BŁĄD]"
+        elif progress.succeeded and n == 0:
+            message, tone, tag = (
+                "Brak aktualizacji Windows do zainstalowania" + restart,
+                "neutral",
+                "[WINDOWS UPDATE]",
+            )
+        elif progress.succeeded:
+            message = "Aktualizacje Windows zainstalowane" + restart
+            tone, tag = "neutral", "[WINDOWS UPDATE]"
+        elif progress.state == "stale" and progress.exit_code is None:
+            message, tone, tag = "Instalacja aktualizacji Windows przerwana", "error", "[BŁĄD]"
+        elif progress.ok_count == 0 and progress.exit_code not in (0, 2, None):
+            message, tone, tag = "Nie zainstalowano aktualizacji Windows", "error", "[BŁĄD]"
+        elif not failed and progress.exit_code in (0, None):
+            message = "Instalacja aktualizacji Windows niepełna" + restart
+            tone, tag = "error", "[BŁĄD]"
+        else:
+            message = "Aktualizacje Windows zakończone z błędami" + restart
+            tone, tag = "error", "[BŁĄD]"
+        actions = [("Pokaż  →", "ghost", lambda: self.navigate("run"), "wuBannerShow")]
+        if self.run_page.bg_panel.log_button.isEnabled():
+            actions.append(("Otwórz log", "ghost", self._open_background_log, "wuBannerLog"))
+        actions.append(("Ukryj", "ghost", self.hide_background_result, "wuBannerHide"))
+        self.wu_banner.configure(
+            tag=tag, tone=tone, message=message, detail=detail, actions=actions
+        )
+
+    def hide_background_result(self) -> None:
+        """Hide the result: banner, nav badge and (for a finished installation) the block,
+        now and on the next starts (remembered in QSettings). A running installation
+        cannot be hidden."""
+        self.wu_banner.hide()
+        progress = self.bg_updates.progress
+        if progress is None or not progress.key:
+            return
+        if progress.done:
+            self._bg_hidden_key = progress.key
+            self.run_page.bg_panel.set_progress(None)
+            self._refresh_background_badge()
+        if self.settings is not None:
+            self.settings.setValue(SETTINGS_HIDDEN_WU_KEY, progress.key)
+
+    def _open_background_log(self) -> None:
+        progress = self.bg_updates.progress
+        if progress is not None:
+            self._open_path(progress.log_path)
 
     # ---------------------------------------------------------------- tools
     def run_tool(self, item_id: str) -> bool:

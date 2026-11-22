@@ -299,8 +299,9 @@ def _simulate_windows_update(
     return ActionOutcome(
         True,
         f"Znaleziono {len(found)} aktualizacji (w tym {optional} opcjonalnych); instalacja "
-        f"uruchomiona w tle (dry-run). Postęp: Ustawienia → Windows Update lub log {log_path}. "
+        f"uruchomiona w tle (dry-run). {updates.PROGRESS_HINT} i log {log_path}. "
         "Po zakończeniu może być wymagany restart.",
+        artifact=log_path,
     )
 
 

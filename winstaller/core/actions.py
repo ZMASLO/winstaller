@@ -566,7 +566,7 @@ def windows_update(ctx: ActionContext) -> ActionOutcome:
         )
     return ActionOutcome(
         True,
-        f"{found}; instalacja uruchomiona w tle. Postęp: Ustawienia → Windows Update lub log "
+        f"{found}; instalacja uruchomiona w tle. {updates.PROGRESS_HINT} i log "
         f"{started.log_path}. Po zakończeniu może być wymagany restart.",
         artifact=started.log_path,
     )
