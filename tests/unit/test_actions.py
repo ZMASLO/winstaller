@@ -797,6 +797,8 @@ class TestExecute:
             "reboot_to_bios",
             "reboot_advanced",
             "battery_report",
+            "windows_update",
+            "store_update",
         }
 
     def test_context_defaults(self, monkeypatch, tmp_path) -> None:

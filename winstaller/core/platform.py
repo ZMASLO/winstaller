@@ -26,6 +26,8 @@ _IMAGE_FILE_MACHINE_AMD64 = 0x8664
 _IMAGE_FILE_MACHINE_ARM64 = 0xAA64
 
 _FOLDERID_DESKTOP = "{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}"
+_FOLDERID_PROGRAM_DATA = "{62AB5D82-FDC1-4DC3-A9DD-070D1D495D97}"
+_FOLDERID_LOCAL_APP_DATA = "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}"
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent  # .../winstaller
 _REPO_ROOT = _PACKAGE_ROOT.parent
@@ -177,6 +179,23 @@ def desktop_dir() -> Path:
     if path is not None:
         return path
     return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop"
+
+
+def program_data_dir() -> Path:
+    """``C:\\ProgramData`` (FOLDERID_ProgramData); fallback ``%ProgramData%``."""
+    path = _known_folder_path(_FOLDERID_PROGRAM_DATA)
+    if path is not None:
+        return path
+    return Path(os.environ.get("PROGRAMDATA") or r"C:\ProgramData")
+
+
+def local_app_data_dir() -> Path:
+    """The user's ``AppData\\Local`` (FOLDERID_LocalAppData); fallback ``%LOCALAPPDATA%``."""
+    path = _known_folder_path(_FOLDERID_LOCAL_APP_DATA)
+    if path is not None:
+        return path
+    fallback = os.environ.get("LOCALAPPDATA")
+    return Path(fallback) if fallback else Path.home() / "AppData" / "Local"
 
 
 def windows_system_dir() -> Path:

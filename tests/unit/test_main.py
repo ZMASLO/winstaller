@@ -66,8 +66,8 @@ def test_smoke(capsys, elevation) -> None:
     assert entry.main(["--smoke"]) == 0
     out = capsys.readouterr().out
     assert get_version_info() in out
-    assert "catalog: 9 kategorii" in out
-    assert "core modules: 8 OK" in out
+    assert "catalog: 10 kategorii" in out
+    assert "core modules: 9 OK" in out
     assert elevation.relaunch_calls == 0
 
 

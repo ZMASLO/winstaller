@@ -4,6 +4,13 @@
 # profiles, UI state and tests refer to them, so do not rename them lightly.
 
 # ---------------------------------------------------------------- categories
+# "updates" is first on purpose: the runner executes in catalog order, so Windows Update
+# and the Store start before everything else (their downloads then run in the background).
+
+[[categories]]
+id = "updates"
+name = "Aktualizacje"
+description = "Aktualizacje systemu Windows i aplikacji Microsoft Store, uruchamiane w tle."
 
 [[categories]]
 id = "basic"
@@ -50,6 +57,27 @@ id = "tools"
 name = "Narzędzia"
 description = "Akcje wykonywane natychmiast, poza kolejką instalacji."
 kind = "tools"
+
+# ------------------------------------------------------------------- updates
+# core/updates.py: search first, then the download and installation continue in the
+# background (Windows Update: detached PowerShell; Store: its InstallService). No restart.
+
+[[items]]
+id = "windows-update"
+name = "Windows Update"
+category = "updates"
+kind = "action"
+action = "windows_update"
+description = "Wyszukuje wszystkie aktualizacje, także opcjonalne (Preview) i sterowniki, i uruchamia ich instalację w tle; może wymagać restartu (nie jest wykonywany automatycznie)."
+confirm = "Instalacja aktualizacji Windows trwa w tle i obciąża system (pobieranie, instalacja); po jej zakończeniu może być wymagany restart."
+
+[[items]]
+id = "store-update"
+name = "Aktualizacje Microsoft Store"
+category = "updates"
+kind = "action"
+action = "store_update"
+description = "Zleca Microsoft Store wyszukanie i automatyczną aktualizację wszystkich aplikacji; pobieranie trwa w tle."
 
 # --------------------------------------------------------------------- basic
 
@@ -424,6 +452,8 @@ id = "benchmark-starter"
 name = "Benchmark starter"
 description = "Zestaw programów i ustawień dla platformy testowej."
 items = [
+    "windows-update",
+    "store-update",
     "hwmonitor",
     "7zip",
     "hwinfo",

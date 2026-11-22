@@ -22,7 +22,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from winstaller.core import drivers, winget
+from winstaller.core import drivers, updates, winget
 from winstaller.core import platform as plat
 from winstaller.core.catalog import Item, ItemKind, is_relative_inside, resolve_relative
 from winstaller.core.platform import Arch
@@ -477,6 +477,161 @@ def install_driver(ctx: ActionContext, vendor_id: str | None) -> ActionOutcome:
     return ActionOutcome(result.ok, result.message, cancelled=result.cancelled)
 
 
+# ------------------------------------------------------------ updates
+
+_CANCELLED_MESSAGE = "Przerwano przez użytkownika."
+
+
+def windows_update(ctx: ActionContext) -> ActionOutcome:
+    """Search all Windows updates (optional/Preview and drivers included) and start
+    their download + install in a detached background process (see core/updates.py).
+    The start is confirmed through the process's status file; the installation itself
+    is never waited for and the machine is never restarted."""
+    try:
+        if updates.background_install_running():
+            return _wu_already_running(ctx, updates.running_install())
+    except updates.UpdatesError as exc:
+        raise ActionError(exc.message) from exc
+    ctx.log(
+        "Wyszukiwanie aktualizacji Windows (także opcjonalnych, Preview i sterowników) — "
+        "może to potrwać kilka minut..."
+    )
+    try:
+        scan = updates.scan_windows_updates(cancel_event=ctx.cancel_event)
+    except updates.UpdatesCancelled:
+        return ActionOutcome(False, _CANCELLED_MESSAGE, cancelled=True)
+    except updates.UpdatesError as exc:
+        raise ActionError(exc.message) from exc
+    for warning in scan.warnings:
+        ctx.log(warning)
+    if not scan.updates:
+        if scan.skipped:
+            raise ActionError(
+                "Nie udało się odczytać żadnej ze znalezionych aktualizacji "
+                f"({scan.skipped} pominiętych) — zainstaluj je w Ustawienia → Windows Update."
+            )
+        return ActionOutcome(True, "System jest aktualny — brak aktualizacji do zainstalowania.")
+    took = f" ({scan.seconds:.0f} s)" if scan.seconds > 0 else ""
+    ctx.log(f"Wyszukiwanie zakończone{took}. Znalezione aktualizacje:")
+    for update in scan.updates:
+        ctx.log(f"  {update.label()}")
+    selected = updates.select_updates(scan.updates)
+    if not selected:
+        return ActionOutcome(
+            True,
+            "Wszystkie znalezione aktualizacje są wyłączone z automatycznej instalacji "
+            "(ustawienia pomijania); zainstaluj je w Ustawienia → Windows Update.",
+        )
+    if scan.reboot_pending:
+        ctx.log(
+            "Ostrzeżenie: Windows czeka na ponowne uruchomienie po wcześniejszej instalacji — "
+            "część aktualizacji może zostać zainstalowana dopiero po restarcie."
+        )
+    if scan.is_admin is False:
+        raise ActionError(
+            "Instalacja aktualizacji Windows wymaga uprawnień administratora — uruchom "
+            "Winstaller jako administrator (lista znalezionych aktualizacji jest w dzienniku)."
+        )
+    if ctx.cancel_event.is_set():
+        return ActionOutcome(False, _CANCELLED_MESSAGE, cancelled=True)
+    try:
+        started = updates.start_windows_update_install(update_ids=[u.id for u in selected])
+    except updates.UpdatesError as exc:
+        raise ActionError(exc.message) from exc
+    if started.already_running:
+        return _wu_already_running(ctx, started)
+    if started.install_all:
+        ctx.log(
+            "Ostrzeżenie: lista aktualizacji jest zbyt długa, aby przekazać ją procesowi w tle — "
+            "zostaną zainstalowane wszystkie aktualizacje, które znajdzie."
+        )
+    try:
+        started = updates.verify_background_start(started, cancel_event=ctx.cancel_event)
+    except updates.UpdatesCancelled as exc:
+        return ActionOutcome(False, exc.message, cancelled=True, artifact=started.log_path)
+    except updates.UpdatesError as exc:
+        raise ActionError(exc.message) from exc
+    ctx.log(f"Uruchomiono pobieranie i instalację w tle (PID {started.pid}).")
+    ctx.log(f"Log: {started.log_path}")
+    if started.status_path is not None:
+        ctx.log(f"Plik statusu: {started.status_path}")
+    optional = sum(1 for u in selected if u.optional)
+    found = f"Znaleziono {len(selected)} aktualizacji (w tym {optional} opcjonalnych)"
+    if started.finished:
+        return ActionOutcome(
+            True,
+            f"{found}; proces instalacji zakończył się od razu bez błędu (kod 0). Szczegóły: "
+            f"log {started.log_path}.",
+            artifact=started.log_path,
+        )
+    return ActionOutcome(
+        True,
+        f"{found}; instalacja uruchomiona w tle. Postęp: Ustawienia → Windows Update lub log "
+        f"{started.log_path}. Po zakończeniu może być wymagany restart.",
+        artifact=started.log_path,
+    )
+
+
+def _wu_already_running(ctx: ActionContext, running: updates.BackgroundInstall) -> ActionOutcome:
+    ctx.log("Instalacja aktualizacji Windows już trwa w tle — nie uruchamiam drugiej.")
+    return ActionOutcome(
+        True,
+        f"Instalacja aktualizacji już trwa w tle. Log: {running.log_path}",
+        artifact=running.log_path,
+    )
+
+
+STORE_UNCONFIRMED = (
+    "wyniku nie da się potwierdzić — sprawdź w Microsoft Store → Pobrane (Biblioteka)."
+)
+
+
+def store_update(ctx: ActionContext) -> ActionOutcome:
+    """Ask the Microsoft Store to update every app; the download continues in the
+    system's InstallService after this returns."""
+    ctx.log("Zlecanie Microsoft Store wyszukania i instalacji aktualizacji aplikacji...")
+    try:
+        result = updates.update_store_apps(cancel_event=ctx.cancel_event, log=ctx.log)
+    except updates.UpdatesCancelled:
+        return ActionOutcome(False, _CANCELLED_MESSAGE, cancelled=True)
+    except updates.UpdatesError as exc:
+        raise ActionError(exc.message) from exc
+    if not result.confirmed:  # store.exe: requested, never confirmed
+        for line in result.lines:
+            ctx.log(f"  {line}")
+        if result.found_count == 0:
+            return ActionOutcome(
+                True,
+                "Wiersz poleceń Sklepu (store.exe) nie zgłosił aktualizacji aplikacji; "
+                + STORE_UNCONFIRMED,
+            )
+        what = f"{result.found_count} aplikacji" if result.found_count else "aplikacji"
+        return ActionOutcome(
+            True,
+            f"Zlecono aktualizację {what} Microsoft Store przez wiersz poleceń Sklepu "
+            f"(store.exe); {STORE_UNCONFIRMED}",
+        )
+    for item in result.items:
+        ctx.log(f"  {item.label()}")
+    for item in result.failed:
+        code = f", kod {item.error_code}" if item.error_code else ""
+        ctx.log(f"  Błąd: {item.label()} (stan {item.state or 'nieznany'}{code})")
+    if result.failed and not result.items:
+        raise ActionError(
+            f"Microsoft Store nie zlecił żadnej aktualizacji: wszystkie {len(result.failed)} "
+            f"pozycji zakończyło się błędem (szczegóły w dzienniku). {updates.STORE_MANUAL_HINT}"
+        )
+    if result.count == 0:
+        return ActionOutcome(True, "Aplikacje Microsoft Store są aktualne.")
+    message = (
+        f"Zlecono aktualizację {result.count} aplikacji Microsoft Store; pobieranie i instalacja "
+        "trwają w tle (postęp: Microsoft Store → Pobrane)."
+    )
+    if result.failed:
+        message += f" Uwaga: {len(result.failed)} pozycji z błędem (szczegóły w dzienniku)."
+    return ActionOutcome(True, message)
+
+
 # ------------------------------------------------------------- registry
 
 ACTIONS: Mapping[str, ActionFunc] = {
@@ -488,6 +643,8 @@ ACTIONS: Mapping[str, ActionFunc] = {
     "reboot_to_bios": reboot_to_bios,
     "reboot_advanced": reboot_advanced,
     "battery_report": battery_report,
+    "windows_update": windows_update,
+    "store_update": store_update,
 }
 
 

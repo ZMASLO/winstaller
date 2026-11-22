@@ -67,6 +67,8 @@ winstaller/
     winget.py        StreamParser (czysty), stream_process, kody winget, install/uninstall
     actions.py       akcje systemowe + execute(item, ctx); cienka warstwa systemowa do mockowania
     drivers.py       sterowniki GPU: ustalanie wersji u producenta, pobieranie, podpis, instalacja
+    updates.py       Windows Update (skan WUA + instalacja w tle) i aktualizacje Microsoft Store
+    update_scripts.py  skrypty PowerShell dla updates.py (stałe, uruchamiane przez -EncodedCommand)
     runner.py        TaskRunner, statusy, wyniki, listener, symulacja dry-run
     updater.py       check / download / apply / cleanup_old
   ui/                PySide6, opis niżej („Interfejs (winstaller/ui)”)
@@ -77,7 +79,9 @@ packaging/           entry.py (wejście PyInstallera), winstaller.ico
 
 Zależności między modułami `core` (bez cykli na poziomie modułu):
 `version` ← `platform` ← `catalog` ← `winget` ← `drivers` ← `actions` ← `runner`; `updater`
-używa `platform` i `version`; `drivers` używa tylko `winget` i `version`.
+używa `platform` i `version`; `drivers` używa tylko `winget` i `version`; `updates` używa
+`platform`, `winget` i `update_scripts` (bez `catalog`/`actions`), a korzystają z niego
+`actions` i `runner` (dry-run).
 `catalog.parse_catalog` importuje leniwie `actions.ACTIONS` (walidacja nazw akcji) i
 `drivers.VENDORS` (walidacja producentów).
 
@@ -141,6 +145,8 @@ def app_dir() -> Path               # frozen: katalog exe; dev: katalog repo
 def desktop_dir() -> Path           # SHGetKnownFolderPath(FOLDERID_Desktop), fallback %USERPROFILE%\Desktop
 def windows_system_dir() -> Path    # GetSystemDirectoryW; fallback %SystemRoot%\System32
 def system32_path(name: str) -> str # pełna ścieżka programu systemowego; FileNotFoundError gdy brak
+def program_data_dir() -> Path      # FOLDERID_ProgramData; fallback %PROGRAMDATA%
+def local_app_data_dir() -> Path    # FOLDERID_LocalAppData; fallback %LOCALAPPDATA%
 POWERSHELL_EXE = r"WindowsPowerShell\v1.0\powershell.exe"
     # programy systemowe (powershell, shutdown, powercfg) zawsze po pełnej ścieżce: po samej
     # nazwie CreateProcess szuka najpierw w katalogu programu i bieżącym, więc podłożony
@@ -315,6 +321,7 @@ ActionFunc = Callable[[ActionContext], ActionOutcome | str | None]
 ACTIONS: Mapping[str, ActionFunc] = {
     "remove_bloat", "theme_dark", "theme_light", "copy_dir_to_desktop" (args[0] = nazwa folderu),
     "copy_self_to_desktop", "reboot_to_bios", "reboot_advanced", "battery_report",
+    "windows_update", "store_update",   # cienkie: wołają core/updates.py (sekcja niżej)
 }
 def execute(item: Item, ctx: ActionContext) -> ActionOutcome   # realne wykonanie pozycji
 def install_driver(ctx, vendor_id) -> ActionOutcome  # DRIVER: drivers.install_latest;
@@ -349,6 +356,9 @@ Zachowanie akcji:
 - raport baterii: `powercfg /batteryreport /output <pulpit>\battery-report.html`
   (fallback `app_dir`), ścieżka w `ActionOutcome.artifact` i `TaskResult.artifact`;
 - `post_launch`: tylko po udanej instalacji i gdy plik istnieje.
+
+- `windows_update` / `store_update`: opis w sekcji „`winstaller.core.updates`”;
+  `UpdatesError` → `ActionError(exc.message)`, `UpdatesCancelled` → `ActionOutcome(cancelled=True)`.
 
 `download_install`/`download_unzip_install` z 1.x **nie zostały przeniesione** — po przejściu
 DaVinci na lokalny instalator nic ich nie używa.
@@ -559,6 +569,286 @@ instalatorów ani pobierać całych pakietów):
   bez podniesienia nie ma dostępu), wynika z domyślnego właściciela tokenu administratora i
   nie było sprawdzone.
 
+### `winstaller.core.updates` (Windows Update i Microsoft Store)
+
+Kategoria `updates` „Aktualizacje” jest **pierwsza w katalogu** (runner wykonuje w kolejności
+katalogu, więc aktualizacje startują przed wszystkim), pokazywana jako pierwsza sekcja strony
+**System**. Pozycje (`kind = "action"`, x64 i arm64, obie na początku profilu „Benchmark
+starter”): `windows-update` (akcja `windows_update`, z `confirm`) i `store-update` (akcja
+`store_update`, bez `confirm`). **Decyzje właściciela (2026.11.22)**: tryb „w tle” (zadanie
+kończy się zaraz po zleceniu), zakres „wszystko”: zwykłe, opcjonalne/Preview i sterowniki z
+WU, także klasy Display; nigdy automatyczny restart.
+
+```python
+class UpdatesError(Exception)        # .message (PL), .kind (ErrorKind), .hresult ("0x8024402C"|None)
+class UpdatesCancelled(UpdatesError) # kind = "cancelled"
+ErrorKind = Literal["network", "service_disabled", "policy", "busy", "reboot", "server",
+                    "not_elevated", "timeout", "cancelled", "format", "start", "store",
+                    "blocked", "other"]
+HRESULT_KINDS: Mapping[int, ErrorKind]; def error_kind(hresult) -> ErrorKind
+def describe_wu_error(hresult, detail="") -> UpdatesError      # polski komunikat + „(kod 0x…)”
+@dataclass(frozen=True) class WindowsUpdateInfo:
+    id (GUID, małe litery); revision; title; kb: tuple[str, ...]; type: "software"|"driver"
+    optional (DeploymentAction=OptionalInstallation); browse_only; downloaded; categories
+    interactive (CanRequestUserInput); driver_class; driver_model; driver_vendor
+    is_driver; key; label() -> "KB… — tytuł [opcjonalna] [sterownik]"   # bez rozmiarów
+@dataclass(frozen=True) class WindowsUpdateScan:
+    updates; reboot_pending; is_admin: bool|None (None = nieznane); seconds; criteria
+    result_code; warnings: tuple[str, ...] (do logu); skipped: int; optional_count; driver_count
+@dataclass(frozen=True) class BackgroundInstall:
+    log_path; status_path|None; pid|None; already_running; install_all; finished
+@dataclass(frozen=True) class StoreAppInfo:
+    product_id; package_family_name; install_type; state; error_code; failed; name; label()
+@dataclass(frozen=True) class StoreUpdateResult:
+    method: "AppInstallManager"|"store-cli"; items (zlecone); failed (stan Error/kod błędu)
+    lines (store-cli); found_count; auto_update_setting; queue
+    confirmed (property: True tylko dla WinRT); count (property)
+
+def scan_windows_updates(*, cancel_event=None, timeout=SCAN_TIMEOUT) -> WindowsUpdateScan  # 180 s
+def select_updates(updates, *, skip_drivers=SKIP_DRIVERS, skip_display_drivers=SKIP_DISPLAY_DRIVERS,
+                   skip_interactive=SKIP_INTERACTIVE) -> list[WindowsUpdateInfo]  # wszystkie False
+def background_install_running() -> bool                 # sam mutex (bez potwierdzenia)
+def running_install() -> BackgroundInstall               # potwierdzenie plikiem statusu albo
+                                                         # UpdatesError(kind="blocked"); tylko odczyt
+def start_windows_update_install(*, update_ids=(), install_all=False, skip_drivers=False,
+                                 skip_display_drivers=False, skip_interactive=False,
+                                 now=None) -> BackgroundInstall
+    # pusta lista bez install_all -> UpdatesError; lista > MAX_IDS_CHARS -> install_all
+def verify_background_start(started, *, cancel_event=None, timeout=START_CONFIRM_TIMEOUT=10,
+                            poll=0.1) -> BackgroundInstall
+def update_store_apps(*, cancel_event=None, timeout=STORE_TIMEOUT, log=None) -> StoreUpdateResult
+def list_store_queue(*, cancel_event=None, timeout=STORE_TIMEOUT) -> StoreUpdateResult  # tylko odczyt
+def log_dir() -> Path; def existing_log_dirs() -> list[Path]   # tworzy / tylko czyta
+# czyste (bez I/O; śmieci -> UpdatesError, nigdy nic innego — dekorator @_parser):
+parse_wu_scan(text, *, stderr="", returncode=0) -> WindowsUpdateScan
+parse_store_update(text, *, stderr="", returncode=0) -> StoreUpdateResult
+parse_store_cli_output(text, returncode=0) -> StoreUpdateResult
+# pomocnicze czyste: clean_powershell_stderr (CLIXML), clean_store_lines, compact_script,
+# powershell_args(script, *, hidden=False), hresult_value, format_hresult, validate_update_ids,
+# log_file_names(now), latest_log(folder), security_is_trusted(owner, aces), describe_exit
+# stałe: CHILD_ENV_ALLOWED, LOG_DIR_SDDL, TRUSTED_OWNERS, TRUSTED_WRITERS, EXIT_MESSAGES,
+# BLOCKED_MESSAGE, MAX_IDS_CHARS
+DRY_RUN_WINDOWS_UPDATES, DRY_RUN_STORE_APPS, DRY_RUN_LOG_PATH   # dane symulacji (runner)
+```
+
+Warstwa systemowa (do `monkeypatch`): `run_powershell(script, *, env=None, timeout,
+cancel_event=None) -> (returncode, stdout, stderr)` (ustawione wcześniej anulowanie → nic nie
+startuje; anulowanie w trakcie → zabicie procesu i `UpdatesCancelled`; timeout → zabicie i
+`UpdatesError(kind="timeout")`), `start_background(args, env) -> pid`, `mutex_exists(name)`,
+`run_store_cli(args, *, timeout, cancel_event) -> (returncode, output)`, `log_dir()`,
+`existing_log_dirs()`, `create_secure_dir(path, sddl)`, `read_dir_security(path)`,
+`dir_is_trusted(path)`, `process_image(pid)`, `process_running(pid)`,
+`is_live_powershell(pid)`, `background_exit_code(pid)`, `read_status(path)`. Skrypty:
+`update_scripts` (`WU_SCAN_SCRIPT`, `WU_INSTALL_SCRIPT`, `STORE_SCRIPT`, `ALL_SCRIPTS`,
+`WU_CRITERIA`, `WU_FALLBACK_CRITERIA`).
+
+**Dlaczego WUA (`Microsoft.Update.Session`), a nie USO/winget/MDM** (zbadane 2026-11-22 na
+Windows 11 Insider 26300): `UsoClient` w tej kompilacji nie ma poleceń instalacji i nie obejmuje
+aktualizacji opcjonalnych; `winget` nie widzi aplikacji Store; most MDM (WMI
+`MDM_EnterpriseModernAppManagement`) wymaga konta SYSTEM i tylko skanuje. Windows Update idzie
+więc przez WUA z PowerShella 5.1, a Store przez WinRT `AppInstallManager`.
+
+**Kryterium wyszukiwania.** Aktualizacje Preview/opcjonalne (w Ustawieniach „Pobierz i
+zainstaluj”) są widoczne tylko z wyrazem `DeploymentAction`; bez niego WUA zakłada
+`'Installation'`. Główne (udokumentowana składnia: OR tylko na najwyższym poziomie, AND wiąże
+mocniej): `IsInstalled=0 and IsHidden=0 and DeploymentAction='Installation' or IsInstalled=0
+and IsHidden=0 and DeploymentAction='OptionalInstallation'`. Zapasowe, tylko gdy WUA odrzuci
+główne kodem `0x80240032` (WU_E_INVALID_CRITERIA) lub `0x80070057`: nieudokumentowane
+`… and DeploymentAction=*` (na maszynie testowej oba dają ten sam komplet). Kolejność wybrana
+tak, bo wartość `*` nie ma oparcia w dokumentacji i może przestać działać bez ostrzeżenia, a
+jawne OR jest opisane. Wynik bez duplikatów po `UpdateID`+`RevisionNumber` (w skrypcie i w
+parserze). Wyszukiwanie działa bez admina. `MaxDownloadSize` nie jest odczytywany ani
+pokazywany (dla LCU to suma wariantów, ~97 GB). Skan ma limit 180 s i reaguje na Stop
+(zabicie PowerShella).
+
+**Przebieg `windows_update`**: mutex `Global\Winstaller.WindowsUpdate` istnieje → szukamy
+w zaufanych katalogach logów (`existing_log_dirs`, tylko odczyt) naszego pliku statusu ze
+`state = running` i PID-em żyjącego `powershell.exe`; jest → „Instalacja aktualizacji już trwa
+w tle” + ścieżka logu, OK, bez skanu; nie ma → zadanie **FAILED** („Inny proces blokuje
+aktualizację Windows…”), bo mutex mógł założyć dowolny proces. Inaczej: skan → ostrzeżenia
+skanu w logu (ResultCode 3, pominięte wadliwe pozycje) → lista (`  KB… — tytuł [opcjonalna]
+[sterownik]`) → pusta: „System jest aktualny…” (OK; same pominięte pozycje → FAILED) →
+`reboot_pending`: ostrzeżenie → `scan.is_admin is False` (proces bez podniesienia, np.
+`--no-elevate`): **FAILED** „wymaga uprawnień administratora”, nic nie startuje → start procesu
+w tle z allow-listą ID ze skanu → **weryfikacja startu** (`verify_background_start`, niżej) →
+OK z komunikatem „Znaleziono N aktualizacji (w tym M opcjonalnych); instalacja uruchomiona w
+tle. Postęp: Ustawienia → Windows Update lub log <ścieżka>. Po zakończeniu może być wymagany
+restart.” i `artifact` = log. Strona Przebieg nie pokazuje `artifact` pozycji kolejki, więc
+ścieżka jest w logu, dzienniku i komunikacie.
+
+**Weryfikacja startu** (`verify_background_start`): do 10 s (Stop przerywa — wtedy
+`CANCELLED` z informacją, że instalacja mogła już ruszyć) czytany jest plik statusu. Sukces
+tylko gdy `state = running` z naszym PID-em i proces żyje albo `state = finished` z kodem 0.
+Proces zakończony od razu (status `finished` z kodem ≠ 0 albo brak statusu — kod wyjścia z
+`Popen`) → FAILED z komunikatem dla kodu (`EXIT_MESSAGES`: 3 inna instancja, 4 brak uprawnień,
+5 wymagany restart przed instalacją, 6 WU zajęty, 7 złe parametry, inne) i ścieżką logu; brak
+potwierdzenia w czasie → FAILED. Skrypt sprawdza uprawnienia **przed** pierwszym zapisem
+statusu, więc kod 4 nigdy nie wygląda jak `running`; kody 5/6 zapadają później (po
+wyszukiwaniu) — są w logu i statusie, nie w wyniku zadania. Limit 10 s (zamiast ~5) z powodu
+zimnego startu PowerShella na wolnych dyskach; potwierdzenie zwykle przychodzi po 0,2–0,5 s.
+
+**Równoległe starty w jednym procesie**: sekcja krytyczna (`threading.Lock`) wokół
+przygotowania i startu; drugi wywołujący po wejściu porównuje licznik startów z wartością
+sprzed czekania — jeśli ktoś uruchomił proces w międzyczasie (jego mutex mógł jeszcze nie
+powstać), dostaje `already_running` z tym samym logiem. Między procesami chroni mutex skryptu.
+
+**Proces w tle** (`start_windows_update_install`): `powershell.exe` z pełnej ścieżki System32,
+`-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand
+<WU_INSTALL_SCRIPT>`; `creationflags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP |
+CREATE_BREAKAWAY_FROM_JOB` (przy `OSError` z `winerror == 5` — job bez
+`JOB_OBJECT_LIMIT_BREAKAWAY_OK` — ponowienie bez BREAKAWAY), `stdin/stdout/stderr=DEVNULL`,
+`close_fds=True`, `cwd` = System32, środowisko z białej listy (niżej). Parametry
+**wyłącznie przez zmienne środowiskowe**:
+`WINSTALLER_WU_LOG`, `WINSTALLER_WU_STATUS` (ścieżki bezwzględne, inaczej kod 7),
+`WINSTALLER_WU_IDS` (GUID-y po przecinku, walidowane w Pythonie), `WINSTALLER_WU_ALL`
+(„1” = wszystko, co znajdzie; pusta lista bez tej flagi → kod 7; Python przechodzi na „all”
+z ostrzeżeniem w logu, gdy lista przekracza `MAX_IDS_CHARS` = 30 000 znaków),
+`WINSTALLER_WU_SKIP_DRIVERS`, `WINSTALLER_WU_SKIP_DISPLAY_DRIVERS`,
+`WINSTALLER_WU_SKIP_INTERACTIVE` („1” = pomiń; domyślnie wszystkie „0”). Skrypt tworzy mutex i
+zaraz ogranicza jego DACL do Administratorów i SYSTEM (chroniony,
+`MutexSecurity`), sprawdza uprawnienia (kod 4 przed pierwszym statusem), sam wyszukuje
+ponownie (to samo kryterium), instaluje tylko pozycje z allow-listy, `AcceptEula()`, czeka do
+10 min, gdy `IsBusy`, kończy kodem 5 przy `RebootRequiredBeforeInstallation`, pobiera jednym
+`IUpdateDownloader.Download()` (tylko niepobrane), instaluje **pojedynczo** (`IUpdateInstaller`,
+`ForceQuiet`, `AllowSourcePrompts = $false`; aktualizacja z wyłącznym trybem instalacji musi
+być sama, a jeden błąd nie przerywa reszty), wyjątki per aktualizacja, nigdy restart. Kody
+wyjścia: 0 OK/nic do zrobienia, 1 nieoczekiwany błąd, 2 część się nie udała, 3 inna instancja
+(mutex), 4 brak admina, 5 wymagany restart przed instalacją, 6 WU zajęty, 7 złe parametry.
+Długość: skrypt po `compact_script` (bez wcięć, pustych linii i komentarzy) daje ok. 23 tys.
+znaków `-EncodedCommand` — poniżej limitu 32 767 (`powershell_args` sprawdza całość i rzuca
+`UpdatesError`; `--smoke` buduje wszystkie trzy i wypisuje maksimum). `-EncodedCommand` zamiast
+pliku `.ps1`: brak pliku na dysku = nic do podmiany między zapisem a uruchomieniem.
+
+`CanRequestUserInput`: WUA oznacza tak większość sterowników (na maszynie testowej 3 z 3), a
+Windows Update instaluje je po cichu — pomijanie takich pozycji wyłączyłoby sterowniki wbrew
+decyzji właściciela, więc domyślnie **nie** są pomijane (`ForceQuiet`, wynik per aktualizacja);
+przełącznik `skip_interactive` zostaje.
+
+**Katalog logów** (`log_dir`). Proces **podniesiony**: `%ProgramData%\Winstaller\logs`;
+każdy poziom (`Winstaller`, `logs`) tworzony osobno przez `CreateDirectoryW` z
+`SECURITY_ATTRIBUTES` z SDDL `D:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)`
+(chroniony DACL nadany w chwili tworzenia: pełne prawa Administratorzy i SYSTEM, odczyt
+Użytkownicy, bez dziedziczenia; bez właściciela w SDDL — domyślnym właścicielem obiektów
+tworzonych przez podniesiony token administratora jest grupa Administratorzy). Gdy poziom
+**już istnieje**, jest używany tylko jeśli: nie jest punktem reparse (sprawdzane przed i po
+próbie utworzenia; `CreateDirectoryW` na junction kończy się „już istnieje” i niczego nie
+tworzy pod celem), właścicielem jest Administratorzy/SYSTEM/TrustedInstaller i żaden wpis
+„allow” DACL nie daje praw zapisu (`FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `WRITE_EA`,
+`DELETE_CHILD`, `WRITE_ATTRIBUTES`, `DELETE`, `WRITE_DAC`, `WRITE_OWNER`, `GENERIC_WRITE/ALL`,
+`MAXIMUM_ALLOWED`) nikomu poza Administratorzy/SYSTEM; nieznane typy wpisów = niezaufany
+(`GetNamedSecurityInfoW` + `GetAce`, nie parsowanie tekstu `icacls`). Niezaufanego drzewa
+**nie naprawiamy** (żadnego `icacls /T`, żadnego tworzenia przez link): powstaje świeży
+`%ProgramData%\Winstaller-<8 znaków hex>\logs` z tym samym DACL, ostrzeżenie w logu Pythona i
+w pierwszych liniach logu instalacji; gdy i to zawiedzie → `UpdatesError`. Proces
+**niepodniesiony** (tryb dev `--no-elevate`; instalacji i tak się wtedy nie uruchamia):
+`%LOCALAPPDATA%\Winstaller\logs` bez zmian ACL, z odrzucaniem linków. `running_install` i
+`existing_log_dirs` tylko czytają (nie tworzą katalogów, nie zmieniają ACL).
+
+**Pliki logu i statusu**: nazwy `windows-update-RRRR.MM.DD-GGMMSS.log` i `.json` (przy
+kolizji sufiks `-2`…; `latest_log` sortuje naturalnie: znacznik czasu, potem sufiks, potem
+czas modyfikacji). Log: UTF-8 z BOM (Notatnik), linia po linii z czasem, po polsku, tekst
+oczyszczany ze znaków sterujących, separatorów linii i znaków bidi/zero-width (`Get-CleanText`
+w skrypcie, `_one_line` w Pythonie); pierwszą linię zapisuje Winstaller (`open(..., "x")` —
+wyłączne utworzenie; przy nieudanym starcie procesu plik jest usuwany), resztę skrypt. Status
+JSON (UTF-8 bez BOM, znacznik `"winstaller": "wu-install"`): na starcie `state: running`,
+`pid`; po każdej aktualizacji wyniki; na końcu `state: finished`, `updates[]` (`id`,
+`revision`, `title`, `result`: succeeded|succeeded_with_errors|failed|aborted|unknown|
+not_downloaded|error, `hresult`, `rebootRequired`), `rebootRequired`, `exitCode`, `error`.
+Zapis atomowy: stary `.tmp` usuwany, nowy tworzony `CreateNew`, potem `File.Replace`/`Move`.
+
+**Środowisko procesów potomnych** (`_child_env`, każdy PowerShell i `store.exe`): biała
+lista `CHILD_ENV_ALLOWED` (`SystemRoot`, `windir`, `SystemDrive`, `ComSpec`, `PATHEXT`,
+`TEMP`/`TMP`, `USERPROFILE`, `LOCALAPPDATA`, `APPDATA`, `ProgramData`, `ProgramFiles*`,
+`CommonProgramFiles*`, `USERNAME`, `USERDOMAIN`, `COMPUTERNAME`, `NUMBER_OF_PROCESSORS`,
+`PROCESSOR_ARCHITECTURE`, `OS`, `PUBLIC`, `ALLUSERSPROFILE`, `HOMEDRIVE`/`HOMEPATH`) i
+`WINSTALLER_*`, porównanie nazw bez wielkości liter; `PATH` jawnie = `System32;System32\Wbem;
+System32\WindowsPowerShell\v1.0`, `PSModulePath` jawnie = `System32\WindowsPowerShell\v1.0\
+Modules`. Nic z `COR_*`, `COMPlus_*`, `DOTNET_*`, `PYTHON*`, `PSModulePath` użytkownika.
+PowerShell 5.1 sam dopisuje na początek `%ProgramFiles%\WindowsPowerShell\Modules`
+(zapisywalne tylko dla administratorów) — tego nie da się wyłączyć; skrypty i tak używają
+tylko modułów wbudowanych. Sprawdzone realnym skanem WUA, odczytem kolejki Store (WinRT) i
+skryptem zastępczym w tle.
+
+**Microsoft Store** (`update_store_apps`): metoda główna — `STORE_SCRIPT` z
+`WINSTALLER_STORE_MODE=update`: `AppInstallManager.IsStoreBlockedByPolicyAsync` (best effort),
+potem `SearchForAllUpdatesAsync("", "Winstaller", AppUpdateOptions{
+AutomaticallyDownloadAndInstallUpdateIfFound = true, AllowForcedAppRestart = false})` przez most
+`AsTask` z limitem; zwraca listę `AppInstallItem`, kolejkę realizuje usługa InstallService
+(proces może się zakończyć). Pozycje w stanie `Error` lub z `errorCode` **nie** liczą się jako
+zlecone (`StoreUpdateResult.failed`, w logu jako „Błąd: …”); wszystkie błędne → FAILED,
+część → OK z ostrzeżeniem i liczbami. Tryb domyślny skryptu (brak/inna wartość zmiennej) to
+bezpieczne `list` — tylko odczyt `AppInstallItems`. Blokada zasadami → błąd bez metody
+zapasowej. **Timeout** metody głównej (Pythona albo `TimeoutException` w skrypcie, zgłaszany
+polem `error.timeout`) → błąd „nie udało się potwierdzić” **bez** `store.exe` (zlecenie mogło
+już pójść — drugie by je zdublowało). Metoda zapasowa tylko, gdy główna zawiodła przed
+zleceniem (błąd ładowania typów/COM, odrzucone zlecenie, brak wyniku, brak PowerShella):
+`store.exe updates --apply` (`%LOCALAPPDATA%\Microsoft\WindowsApps\store.exe`; uruchamiany
+tylko, gdy jest punktem reparse `IO_REPARSE_TAG_APPEXECLINK`; `stdin=DEVNULL`, `NO_COLOR=1`,
+środowisko z białej listy, limit 300 s). **Ocena wyniku `store.exe`** (jego kod wyjścia bywa 0
+po błędzie, więc jest ignorowany): jakikolwiek znacznik błędu (`[y/n]`, `0x` + 8 cyfr hex,
+`timed out`/`timeout`, `error(s)`, `fail…`, `blocked`, `sign in`, `exception`, `denied`,
+`unable to`, `could not`, `cannot`, `non-interactive`, „Zainstalowano 0 z”, „błąd”, „nie
+udało”, „nie można”, „nie powiodło”, „zablokowan…”, „zaloguj”, „przekroczono”/„limit czasu”)
+albo brak wyjścia → błąd; w przeciwnym razie wynik **„zlecono, ale niepotwierdzone”**
+(`confirmed = False`): zadanie OK z komunikatem, że aktualizację zlecono przez wiersz poleceń
+Sklepu i wyniku nie da się potwierdzić (Microsoft Store → Pobrane), oczyszczone wyjście w
+logu. Żadnej heurystyki „sukcesu”. Obie metody zawiodą → `UpdatesError` z instrukcją
+ręczną; żadne okno nie jest otwierane.
+
+**Zabezpieczenia** (Winstaller działa jako admin; proces w tle też):
+
+| Zagrożenie | Zabezpieczenie |
+|---|---|
+| podłożony `powershell.exe` | pełna ścieżka `system32_path` |
+| podmiana pliku skryptu przed uruchomieniem z prawami admina (`_MEIPASS` onefile jest zapisywalny dla użytkownika) | skrypty to stałe w kodzie (PYZ w exe), przekazywane `-EncodedCommand`; pliku skryptu na dysku nie ma |
+| wstrzyknięcie przez parametry | brak interpolacji do treści skryptu; parametry w zmiennych środowiskowych, ID walidowane jako GUID (Python), ścieżki muszą być bezwzględne (skrypt) |
+| proces bez podniesienia podkłada dowiązanie/junction lub zakłada katalog tam, gdzie pisze proces admina (domyślnie Użytkownicy mogą tworzyć pliki i foldery w `%ProgramData%`) | katalogi tworzone z chronionym DACL w chwili utworzenia; istniejące używane tylko po sprawdzeniu właściciela i DACL przez API; punkty reparse odrzucane; niezaufane drzewo nie jest naprawiane (świeży losowy katalog); log tworzony wyłącznie (`"x"`); `.tmp` statusu usuwany i tworzony `CreateNew` |
+| wstrzyknięcie kodu do podniesionego PowerShella przez środowisko (`COR_PROFILER`, `COMPlus_*`, `DOTNET_*`, `PSModulePath`, `PATH`) | biała lista zmiennych, `PATH`/`PSModulePath` jawnie systemowe |
+| druga instancja instalacji / fałszywa „trwająca instalacja” | mutex `Global\Winstaller.WindowsUpdate` z DACL tylko Administratorzy/SYSTEM; Python uznaje „już trwa” tylko z potwierdzeniem plikiem statusu (`running` + żywy `powershell.exe`) w zaufanym katalogu, inaczej FAILED „inny proces blokuje”; sekcja krytyczna przeciw równoległym startom w jednym procesie |
+| fałszywy sukces (proces w tle od razu kończy się błędem, `store.exe` zgłasza błąd z kodem 0) | weryfikacja startu przez plik statusu i kod wyjścia; `store.exe` bez znaczników błędu = tylko „niepotwierdzone” |
+| podrobione linie logu w tytułach aktualizacji | usuwanie znaków sterujących, separatorów linii, bidi/zero-width w skrypcie i w Pythonie; podział wyjścia JSON tylko po `\n` |
+| fałszywy `store.exe` w profilu użytkownika | tylko alias App Execution (tag reparse); ochrona częściowa — to samo ryzyko co `winget` po nazwie |
+| zawieszony skan/Store | limity 180 s (skan, WinRT) / 300 s (`store.exe`), zabicie procesu, reakcja na Stop |
+| nieoczekiwany restart | nigdzie nie ma restartu; `ForceQuiet` nie restartuje, `RebootRequired` trafia do logu/statusu |
+
+Sprawdzone 2026-11-22: realny skan WUA przez `scan_windows_updates()` (5 pozycji, 7–10 s, bez
+admina), akcja z zamockowanym `start_background`, `list_store_queue()` (tylko odczyt), składnia
+wszystkich skryptów (`Parser.ParseInput`, 0 błędów), `start_background` na nieszkodliwym
+skrypcie zastępczym trzymającym mutex: proces ukryty (`MainWindowHandle = 0`), przeżywa
+zakończenie rodzica (także rodzica w jobie z `KILL_ON_JOB_CLOSE` + `BREAKAWAY_OK`), zmienne
+środowiskowe z polskimi znakami docierają, `mutex_exists`/`background_install_running` widzą
+mutex, a `start_windows_update_install` przy trzymanym mutexie niczego nie uruchamia. W jobie z
+`KILL_ON_JOB_CLOSE` **bez** `BREAKAWAY_OK` proces ginie razem z rodzicem (ograniczenie systemu).
+
+**ZNANE NIEWIADOME — wymagają testu na prawdziwym sprzęcie** (nie wolno było uruchamiać
+pobierania/instalacji ani zlecenia Store):
+
+- czy `IUpdateInstaller.Install()` instaluje Preview LCU (pakiety UUP/checkpoint) i .NET Preview
+  w procesie spoza Ustawień, jak długo to trwa i czy `ForceQuiet` nie powoduje odmowy; czy
+  instalacja pojedynczo nie psuje zależności (LCU wymagający SSU w tym samym przebiegu);
+- czy sterowniki z flagą `CanRequestUserInput` instalują się z `ForceQuiet` i czy sterownik
+  klasy Display z WU nie nadpisze sterownika producenta z tej samej kolejki (decyzja
+  właściciela: nie pomijamy);
+- przeżycie procesu po zamknięciu **zbudowanego** exe onefile (sprawdzone z procesu Pythona i
+  syntetycznych jobów; jeśli Winstaller zostanie uruchomiony w jobie z `KILL_ON_JOB_CLOSE` bez
+  `BREAKAWAY_OK`, instalacja zginie z nim);
+- `AppInstallManager.SearchForAllUpdatesAsync` z procesu **podniesionego** (uruchomiono wyłącznie
+  odczyt kolejki, bez podniesienia) i to, czy pobieranie rusza bez otwierania Store;
+- `store.exe updates --apply`: czy flaga działa bez wartości (pomoc: `--apply <value>`,
+  przykład bez wartości), jak wygląda wyjście w trakcie/po instalacji (heurystyka słów może dać
+  fałszywy błąd albo fałszywy sukces) i czy bez konsoli nie pyta mimo `--apply`;
+- Windows 10 (inny WUA, brak `store.exe`, inne zachowanie Preview) i ARM64;
+- kolizje z resztą kolejki: instalacja w tle obciąża dysk/sieć w czasie instalacji programów
+  winget (msiexec może czekać na `_MSIExecute`, instalatory mogą zgłosić 1618 „inna instalacja w
+  toku”) oraz sterownik GPU z kolejki równolegle ze sterownikiem z WU;
+- katalog logów z procesu **podniesionego** (sprawdzone tylko w scratchpadzie bez podniesienia:
+  DACL `P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)` i brak zapisu dla
+  zwykłego użytkownika — ale właścicielem był użytkownik; że po podniesieniu właścicielem
+  jest grupa Administratorzy, wynika z domyślnego właściciela tokenu i nie było sprawdzone;
+  `%ProgramData%` nie był dotykany);
+- `MutexSecurity.SetAccessControl` w skrypcie tła (tylko kontrola składni) i to, czy
+  Winstaller bez podniesienia widzi wtedy mutex (`OpenMutexW` → `ERROR_ACCESS_DENIED` = istnieje).
+
 ### `winstaller.core.runner`
 
 ```python
@@ -600,6 +890,10 @@ ENV_DRY_RUN_DELAY = "WINSTALLER_DRY_RUN_DELAY"   # sekundy na krok, 0 = natychmi
     @classmethod from_env(environ=None) -> DryRunConfig
 def make_dry_run_executor(config: DryRunConfig) -> Executor
 ```
+
+Dry-run aktualizacji: `windows_update` — „wyszukiwanie” → lista `updates.DRY_RUN_WINDOWS_UPDATES`
+→ „uruchomiono w tle (PID 4242) — symulacja” + przykładowa ścieżka logu; `store_update` — lista
+`updates.DRY_RUN_STORE_APPS` (3 aplikacje). Bez procesów, plików i sieci; `fail_ids` działa.
 
 Reguły `run()`:
 - kolejność wykonania = kolejność katalogu (jak w 1.x), chyba że `preserve_order=True`;
@@ -827,9 +1121,17 @@ w `actions.py`, wpis w `ACTIONS`, pozycja z `kind = "action"`, `action = "x"`.
   lokalnych) usunięte — oba programy instalują się przez winget.
 - **Sterowniki GPU (decyzja właściciela, 2026.11.20)** — kategoria `gpu-drivers` zaraz po
   „Narzędzia testowe” w katalogu, pokazywana na stronie **System** jako pierwsza sekcja
-  (`SYSTEM_CATEGORY_IDS` w `ui/main_window.py`; przeniesiona z Aplikacji 2026.11.22). Kolejność wykonania = kolejność katalogu, więc sterownik instaluje się po
+  (`SYSTEM_CATEGORY_IDS` w `ui/main_window.py`; przeniesiona z Aplikacji 2026.11.22; od
+  2026.11.22 druga, po „Aktualizacje”). Kolejność wykonania = kolejność katalogu, więc sterownik instaluje się po
   narzędziach testowych, przed aplikacjami profesjonalnymi. Każda pozycja ma `confirm`
   (wyłączenie obrazu, restart) — trafia do zbiorczego potwierdzenia. Bez wykrywania karty.
+- **Aktualizacje (decyzja właściciela, 2026.11.22)** — kategoria `updates` jako pierwsza w
+  katalogu (wykonanie przed wszystkim) i pierwsza sekcja strony System; tryb „w tle”; zakres
+  „wszystko, łącznie z opcjonalnymi, Preview i sterownikami z WU” (świadomie bez pomijania
+  sterowników, także Display; przełączniki `SKIP_*` w `updates.py` domyślnie wyłączone); obie
+  pozycje na początku profilu „Benchmark starter”; `confirm` tylko dla Windows Update.
+  Skrypty jako stałe Pythona zamiast plików `.ps1` w pakiecie — patrz zabezpieczenia w sekcji
+  `updates` (żaden plik skryptu w zapisywalnym `_MEIPASS`).
 - **Kopiowanie BenchmarkTools (x64)** zostaje dostępne na obu architekturach (jak w 1.x);
   „BenchmarkToolsARM” tylko na arm64 i tylko w profilu przez `arch_items.arm64`.
 - **`ensure_installed`** najpierw `Add-AppxPackage -RegisterByFamilyName` (App Installer jest

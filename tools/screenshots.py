@@ -262,8 +262,9 @@ def scene_confirm(out: Path, mode: ThemeMode, prefix: str = "") -> None:
     request = ConfirmRequest(
         title="Potwierdź operację systemową",
         message=(
-            "Kolejka zawiera 1 pozycję, która zmienia system. Pozostałe pozycje nie wymagają "
-            "potwierdzenia."
+            f"Kolejka zawiera {len(risky)} "
+            + ("pozycję, która zmienia" if len(risky) == 1 else "pozycje, które zmieniają")
+            + " system. Pozostałe pozycje nie wymagają potwierdzenia."
         ),
         details=tuple((i.name, i.confirm or "") for i in risky),
     )
@@ -299,6 +300,23 @@ def scene_drivers(out: Path, mode: ThemeMode, prefix: str = "") -> None:
     close(w)
 
 
+def scene_updates(out: Path, mode: ThemeMode, prefix: str = "") -> None:
+    w = make_window(base_services(), mode)
+    w.navigate("system")
+    w.selection.select_many(["windows-update", "store-update"])
+    pump()
+    w.system_page.scroll.verticalScrollBar().setValue(0)
+    save(w, out, f"{prefix}17_aktualizacje_system")
+    w.start_install()
+    wait_until(lambda: w.run.last_summary is not None)
+    pump(80)
+    save(w, out, f"{prefix}18_przebieg_aktualizacje")
+    if not prefix:
+        w.navigate("log")
+        save(w, out, "19_dziennik_aktualizacje")
+    close(w)
+
+
 SCENES: dict[str, Callable[[Path, ThemeMode, str], None]] = {
     "apps": scene_apps,
     "run": scene_run,
@@ -308,8 +326,9 @@ SCENES: dict[str, Callable[[Path, ThemeMode, str], None]] = {
     "winget": scene_winget,
     "confirm": scene_confirm,
     "drivers": scene_drivers,
+    "updates": scene_updates,
 }
-LIGHT_SCENES = ("apps", "run", "about", "tools")
+LIGHT_SCENES = ("apps", "run", "about", "tools", "updates")
 
 
 def scale_variant(out: Path, scale: str) -> None:

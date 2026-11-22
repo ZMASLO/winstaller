@@ -41,13 +41,15 @@ def smoke() -> int:
         drivers,
         platform,
         runner,
+        update_scripts,
         updater,
+        updates,
         version,
         winget,
     )
 
     cat = catalog.load_catalog()
-    modules = (actions, catalog, drivers, platform, runner, updater, version, winget)
+    modules = (actions, catalog, drivers, platform, runner, updater, updates, version, winget)
     print(version.get_version_info())
     print(f"arch: {platform.get_arch()}")
     print(f"frozen: {platform.is_frozen()}")
@@ -56,6 +58,10 @@ def smoke() -> int:
         f"{len(cat.profiles())} profili"
     )
     print(f"core modules: {len(modules)} OK")
+    # Builds every update script's -EncodedCommand (nothing runs): proves the scripts are
+    # in the build and fit the command line limit.
+    sizes = [len(updates.powershell_args(s)[-1]) for s in update_scripts.ALL_SCRIPTS.values()]
+    print(f"update scripts: {len(sizes)} OK (max {max(sizes)} znaków)")
     return 0
 
 

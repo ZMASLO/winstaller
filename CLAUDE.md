@@ -9,7 +9,8 @@ Pełna mapa projektu, kontrakty API `core`, opis UI i format katalogu: **docs/AR
 ## Układ
 
 - `winstaller/core/` — logika bez UI: `catalog.toml` + `catalog.py`, `winget.py`, `actions.py`,
-  `drivers.py` (sterowniki GPU od producentów), `runner.py`, `updater.py`, `platform.py`,
+  `drivers.py` (sterowniki GPU od producentów), `updates.py` + `update_scripts.py` (Windows
+  Update i Microsoft Store), `runner.py`, `updater.py`, `platform.py`,
   `version.py`
 - `winstaller/ui/` — interfejs PySide6 (wejście: `winstaller.ui.app.run(*, dry_run) -> int`);
   wszystko z zewnątrz (runnery, aktualizacje, winget, potwierdzenia, otwieranie plików)
@@ -27,7 +28,7 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -e . --group dev   # pip >= 25.1; albo zainstaluj grupę dev ręcznie
 .venv\Scripts\python -m winstaller --smoke             # szybki test rdzenia, kod 0
 .venv\Scripts\python -m winstaller --dry-run           # UI bez realnych zmian w systemie
-.venv\Scripts\python -m pytest                         # wszystkie testy (~30 s)
+.venv\Scripts\python -m pytest                         # wszystkie testy (~60 s)
 .venv\Scripts\python -m pytest -m "not perf"           # bez benchmarków; -m ui = tylko UI
 .venv\Scripts\python -m ruff check . ; .venv\Scripts\python -m ruff format .
 .venv\Scripts\python tools\screenshots.py <katalog>    # zrzuty UI offscreen
@@ -55,6 +56,15 @@ wyłącza opóźnienia, `WINSTALLER_FAKE_UPDATE=2.0.1` symuluje dostępną aktua
   pobieraj ich (0,9–1,8 GB) — ani w testach, ani ręcznie. W testach sieć przez atrapę
   `session`, procesy przez `monkeypatch` `drivers.run_process` / `drivers.verify_signature`.
   Ręcznie wolno tylko zapytania tylko do odczytu (lookup, HEAD, `Range: bytes=0-1023`).
+- Aktualizacje (`core/updates.py`): nigdy nie uruchamiaj realnej instalacji aktualizacji
+  Windows (skrypt tła `WU_INSTALL_SCRIPT`, `Download()`/`Install()`), `UsoClient` ani zlecenia
+  Store (`SearchForAllUpdatesAsync`, `store updates` w jakiejkolwiek formie — także bez
+  `--apply`, bo pyta z domyślnym TAK i ma skutki uboczne). Dozwolone tylko wyszukiwanie WUA
+  (`updates.scan_windows_updates()`) i odczyt kolejki Store (`updates.list_store_queue()`);
+  w testach `monkeypatch` `updates.run_powershell` / `start_background` / `mutex_exists` /
+  `run_store_cli` / `log_dir` / `existing_log_dirs` / `create_secure_dir` / `dir_is_trusted` /
+  `process_running` / `verify_background_start`. Katalog logów (`%ProgramData%\Winstaller`)
+  ani jego ACL nie zmieniaj ręcznie; operacje ACL tylko na własnych katalogach testowych.
 - Bezpiecznik `tests/conftest.py` (autouse) blokuje procesy, rejestr, sieć, ShellExecute itp.
   we wszystkich testach — nie osłabiaj go. Testy UI dodatkowo (`tests/ui/conftest.py`)
   blokują `QDesktopServices.openUrl`, modalne dialogi i domyślne `QSettings` w rejestrze.

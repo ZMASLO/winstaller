@@ -21,7 +21,7 @@ def test_section_with_three_driver_tiles(make_window) -> None:
         assert kind_tag(tile.item) == "[STEROWNIK]"
         assert tile.available and tile.interactive
     assert "gpu-drivers" not in w.apps_page.sections
-    assert list(w.system_page.sections)[0] == "gpu-drivers"
+    assert list(w.system_page.sections)[:2] == ["updates", "gpu-drivers"]
 
 
 def test_drivers_need_one_combined_confirmation(make_window, qtbot) -> None:

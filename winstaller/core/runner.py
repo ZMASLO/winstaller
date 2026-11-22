@@ -19,7 +19,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
-from winstaller.core import actions, drivers
+from winstaller.core import actions, drivers, updates
 from winstaller.core import platform as plat
 from winstaller.core.actions import ActionContext, ActionError, ActionOutcome
 from winstaller.core.catalog import Catalog, Item, ItemKind
@@ -185,6 +185,10 @@ def make_dry_run_executor(config: DryRunConfig) -> Executor:
                 ctx.log(f"Znaleziono {item.name} [{item.winget_id}] Wersja 1.0.0")
             case ItemKind.LOCAL_EXE:
                 ctx.log(f"Uruchamianie instalatora {item.path}...")
+            case ItemKind.ACTION if item.action == "windows_update":
+                return _simulate_windows_update(item, ctx, config, pause, cancelled)
+            case ItemKind.ACTION if item.action == "store_update":
+                return _simulate_store_update(item, ctx, config, pause, cancelled)
             case ItemKind.ACTION:
                 ctx.log(f"Wykonywanie akcji {item.action}...")
             case ItemKind.DRIVER:
@@ -259,6 +263,70 @@ def _simulate_driver(
         True,
         f"Zainstalowano sterownik {name} {release.version} (dry-run). "
         "Uruchom ponownie komputer, aby dokończyć instalację.",
+    )
+
+
+def _simulate_windows_update(
+    item: Item,
+    ctx: ActionContext,
+    config: DryRunConfig,
+    pause: Callable[[], bool],
+    cancelled: ActionOutcome,
+) -> ActionOutcome:
+    """Windows Update flow as the real action logs it, on :data:`updates.DRY_RUN_*`
+    samples: no PowerShell, no files, no network."""
+    ctx.log(
+        "Wyszukiwanie aktualizacji Windows (także opcjonalnych, Preview i sterowników) — "
+        "może to potrwać kilka minut... (symulacja)"
+    )
+    for _ in range(3):
+        if pause():
+            return cancelled
+    if config.should_fail(item.id):
+        ctx.log("Wyszukiwanie zakończone błędem (symulacja).")
+        return ActionOutcome(False, "Symulowany błąd (dry-run).")
+    found = updates.DRY_RUN_WINDOWS_UPDATES
+    ctx.log("Wyszukiwanie zakończone (12 s). Znalezione aktualizacje:")
+    for update in found:
+        ctx.log(f"  {update.label()}")
+    log_path = updates.DRY_RUN_LOG_PATH
+    ctx.log(
+        "Uruchomiono pobieranie i instalację w tle (PID 4242) — symulacja, nic nie uruchomiono."
+    )
+    ctx.log(f"Log: {log_path}")
+    ctx.log("Start potwierdzony przez plik statusu (state: running) — symulacja.")
+    optional = sum(1 for u in found if u.optional)
+    return ActionOutcome(
+        True,
+        f"Znaleziono {len(found)} aktualizacji (w tym {optional} opcjonalnych); instalacja "
+        f"uruchomiona w tle (dry-run). Postęp: Ustawienia → Windows Update lub log {log_path}. "
+        "Po zakończeniu może być wymagany restart.",
+    )
+
+
+def _simulate_store_update(
+    item: Item,
+    ctx: ActionContext,
+    config: DryRunConfig,
+    pause: Callable[[], bool],
+    cancelled: ActionOutcome,
+) -> ActionOutcome:
+    ctx.log(
+        "Zlecanie Microsoft Store wyszukania i instalacji aktualizacji aplikacji... (symulacja)"
+    )
+    for _ in range(2):
+        if pause():
+            return cancelled
+    if config.should_fail(item.id):
+        ctx.log("Usługa Microsoft Store odrzuciła zlecenie (symulacja).")
+        return ActionOutcome(False, "Symulowany błąd (dry-run).")
+    apps = updates.DRY_RUN_STORE_APPS
+    for app in apps:
+        ctx.log(f"  {app.label()}")
+    return ActionOutcome(
+        True,
+        f"Zlecono aktualizację {len(apps)} aplikacji Microsoft Store (dry-run); pobieranie i "
+        "instalacja trwają w tle (postęp: Microsoft Store → Pobrane).",
     )
 
 

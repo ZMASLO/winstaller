@@ -53,6 +53,36 @@ D:\Narzedzia\
   procyon\procyon-setup.exe
 ```
 
+## Aktualizacje Windows i Microsoft Store
+
+Sekcja „Aktualizacje” na stronie „System” (obie pozycje są też na początku profilu
+„Benchmark starter” i zawsze wykonują się jako pierwsze w kolejce):
+
+| Pozycja | Co się dzieje |
+|---|---|
+| Windows Update | wyszukuje **wszystkie** dostępne aktualizacje — zwykłe, opcjonalne (Preview) i sterowniki z Windows Update — wypisuje je w logu, a potem uruchamia ich pobieranie i instalację **w tle**; zadanie w Winstallerze kończy się od razu |
+| Aktualizacje Microsoft Store | zleca sklepowi wyszukanie i automatyczną aktualizację wszystkich aplikacji; pobieranie trwa dalej w usłudze systemowej Microsoft Store |
+
+Ważne:
+
+- Komputer **nie** uruchamia się ponownie sam. Po zakończeniu instalacji może być wymagany
+  restart — zrób go sam, gdy instalacja się skończy (Ustawienia → Windows Update).
+- Postęp instalacji aktualizacji Windows: Ustawienia → Windows Update albo log
+  `C:\ProgramData\Winstaller\logs\windows-update-RRRR.MM.DD-GGMMSS.log` (obok plik `.json` ze
+  statusem). Gdy katalog `C:\ProgramData\Winstaller` istnieje, ale nie jest bezpieczny
+  (założył go ktoś inny), log trafia do nowego `C:\ProgramData\Winstaller-<losowe>\logs`.
+  Ścieżka logu jest zawsze w dzienniku Winstallera.
+- Winstaller sprawdza, czy instalacja w tle naprawdę wystartowała; jeśli proces od razu się
+  zakończy (np. Windows czeka na restart albo Windows Update jest zajęty), pozycja kończy się
+  błędem z opisem i ścieżką logu.
+- Wynik aktualizacji przez zapasowe polecenie Sklepu (`store.exe`) nie daje się potwierdzić —
+  komunikat mówi wtedy wprost, żeby sprawdzić Microsoft Store → Pobrane.
+- Instalacja w tle obciąża dysk i sieć — w tym czasie reszta kolejki może działać wolniej.
+  Jeśli instalacja aktualizacji już trwa, Winstaller nie uruchamia drugiej.
+- Aktualizacje sterowników z Windows Update też są instalowane (także sterownik grafiki).
+- Gdy sklep nie przyjmie zlecenia, zaktualizuj aplikacje ręcznie: Microsoft Store →
+  Pobrane (Biblioteka) → „Pobierz aktualizacje”.
+
 ## Sterowniki GPU
 
 Sekcja „Sterowniki GPU” na stronie „System” (tylko Windows x64) instaluje najnowszy

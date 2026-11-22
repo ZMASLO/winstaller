@@ -72,8 +72,11 @@ OLD_CATEGORIES: dict[str, list[str]] = {
 OLD_ARM_EXTRA = ("Dodatkowe", "Kopiuj BenchmarkToolsARM na pulpit")
 # New in 2.0 (owner's request): GPU drivers resolved on the vendors' sites at run time.
 NEW_CATEGORIES = {
+    "Aktualizacje": ["Windows Update", "Aktualizacje Microsoft Store"],
     "Sterowniki GPU": ["NVIDIA GeForce Game Ready", "AMD Radeon Adrenalin", "Intel Arc"],
 }
+# New in 2.0 (owner's request): updates run first in the benchmark profile.
+NEW_PROFILE_PREFIX = ["Windows Update", "Aktualizacje Microsoft Store"]
 NEW_DRIVER_IDS = ("driver-nvidia", "driver-amd", "driver-intel")
 OLD_SPLIT_ITEM = "Instaluj lokalne oprogramowanie"
 # Deliberate 2.0 changes to the 1.1.8 list (requested by the project owner).
@@ -199,6 +202,7 @@ class TestRealCatalog:
 
     def test_category_order_and_kinds(self, real: Catalog) -> None:
         assert [c.id for c in real.categories()] == [
+            "updates",
             "basic",
             "launchers",
             "diagnostics",
@@ -210,12 +214,18 @@ class TestRealCatalog:
             "tools",
         ]
         assert [c.id for c in real.categories(CategoryKind.TOOLS)] == ["tools"]
-        assert [c.order for c in real.categories()] == list(range(9))
+        assert [c.order for c in real.categories()] == list(range(10))
 
     def test_tools_and_destructive_items(self, real: Catalog) -> None:
         assert [i.id for i in real.tools()] == ["reboot-bios", "reboot-advanced", "battery-report"]
         destructive = {i.id for i in real.items() if i.destructive}
-        assert destructive == {"remove-bloat", "reboot-bios", "reboot-advanced", *NEW_DRIVER_IDS}
+        assert destructive == {
+            "windows-update",
+            "remove-bloat",
+            "reboot-bios",
+            "reboot-advanced",
+            *NEW_DRIVER_IDS,
+        }
 
     def test_known_special_cases(self, real: Catalog) -> None:
         assert not any(i.unavailable for i in real.items())
@@ -277,8 +287,12 @@ class TestParityWith118:
 
     def test_benchmark_profile_matches_old_benchmark_programs(self, real: Catalog) -> None:
         profile = real.profile("benchmark-starter")
-        assert [real.item(i).name for i in profile.items_for("x64")] == OLD_BENCHMARK_PROGRAMS
+        assert [real.item(i).name for i in profile.items_for("x64")] == [
+            *NEW_PROFILE_PREFIX,
+            *OLD_BENCHMARK_PROGRAMS,
+        ]
         assert [real.item(i).name for i in profile.items_for("arm64")] == [
+            *NEW_PROFILE_PREFIX,
             *OLD_BENCHMARK_PROGRAMS,
             OLD_ARM_EXTRA[1],
         ]

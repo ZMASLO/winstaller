@@ -1,0 +1,26 @@
+Checking for updates…
+
+── Updates available (9 found) ─────────────────────────────────────────────────
+
+Store-managed updates available for bulk installation
+These Store app updates can be installed together in a single operation.
+┌───────────────────────┬───────────────────────┬─────────────────┬────────────┐
+│ Name                  │ Publisher             │ Version         │ Date       │
+├───────────────────────┼───────────────────────┼─────────────────┼────────────┤
+│ Aplikacja Łącze z     │ Microsoft Corporation │ 1.26092.119.0   │ 2026-11-06 │
+│ telefonem             │                       │                 │            │
+│ Aplikacja Start       │ Microsoft Corporation │ 1.398.4.0       │ 2026-10-21 │
+│ Experiences           │                       │                 │            │
+│ HP Smart              │ HP Inc.               │ 166.3.1118.0    │ 2026-10-20 │
+│ Microsoft Store       │ Microsoft Corporation │ 22609.1401.13.0 │ 2026-11-15 │
+│ Paint                 │ Microsoft Corporation │ 11.2609.401.0   │ 2026-11-05 │
+│ Rozszerzenie obrazów  │ Microsoft Corporation │ 1.2.62.0        │ 2026-10-26 │
+│ HEIF                  │                       │                 │            │
+│ WhatsApp              │ WhatsApp Inc.         │ 2.2644.101.0    │ 2026-11-15 │
+│ Windows Web           │ Microsoft Windows     │ 526.21100.40.0  │ 2026-09-26 │
+│ Experience Pack       │                       │                 │            │
+│ XBOX                  │ Microsoft Corporation │ 2701.1001.10.0  │ 2026-11-16 │
+└───────────────────────┴───────────────────────┴─────────────────┴────────────┘
+
+Would you like to install the 9 Store update(s) now? [y/n] (y): 
+Failed to read input in non-interactive mode.

@@ -1,0 +1,32 @@
+
+Description: Check for updates across all installed apps
+
+Usage: store updates [--filter <value>] [--sort <option>] [--reverse <value>] [
+--apply <value>]
+
+Options:
+  --filter                  Filter apps by name or publisher.
+  --sort                    Sort option for the results.
+  --reverse                 Reverse the sorting order.
+  --apply                   If true, updates will be applied immediately if 
+available.
+  --help                    Show this help message
+
+Options for sort:
+┌───────────┬────────────────────────────────────────────┐
+│ value     │ description                                │
+├───────────┼────────────────────────────────────────────┤
+│ name      │ Sort by display name                       │
+│ publisher │ Sort by publisher name                     │
+│ date      │ Sort by most recent install or update date │
+└───────────┴────────────────────────────────────────────┘
+
+Examples:
+  store updates 
+  store updates --search "Microsoft"
+  store updates --sort-by name
+  store updates --search "Visual" --sort-by date
+  store updates --sort-by publisher --reverse
+  store updates --apply
+  store updates --search "Microsoft" --apply
+
