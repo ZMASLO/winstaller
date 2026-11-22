@@ -243,6 +243,19 @@ def system_guard(
     guard.originals["actions.desktop_dir"] = actions.desktop_dir
     monkeypatch.setattr(actions, "desktop_dir", blocked("actions.desktop_dir (use tmp_path)"))
 
+    # Tests use made-up PIDs with a faked image name. The real process table must not
+    # leak in: OpenProcess ignores the two low bits of a PID, so a made-up 777 can hit a
+    # real process (776) on one machine and none on another. Only our own process is
+    # answered for real; a test that needs a start time sets it with monkeypatch.
+    from winstaller.core import updates
+
+    real_create_time = updates.process_create_time
+    monkeypatch.setattr(
+        updates,
+        "process_create_time",
+        lambda pid: real_create_time(pid) if pid == os.getpid() else None,
+    )
+
     yield guard
 
     if guard.violations:
