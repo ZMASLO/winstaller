@@ -13,14 +13,15 @@ DRIVER_IDS = ["driver-nvidia", "driver-amd", "driver-intel"]
 
 def test_section_with_three_driver_tiles(make_window) -> None:
     w = make_window().window
-    section = w.apps_page.sections["gpu-drivers"]
+    w.navigate("system")
+    section = w.system_page.sections["gpu-drivers"]
     assert section.isVisible()
     assert [t.item.id for t in section.tiles] == DRIVER_IDS
     for tile in section.tiles:
         assert kind_tag(tile.item) == "[STEROWNIK]"
         assert tile.available and tile.interactive
-    order = list(w.apps_page.sections)
-    assert order.index("gpu-drivers") == order.index("testing") + 1
+    assert "gpu-drivers" not in w.apps_page.sections
+    assert list(w.system_page.sections)[0] == "gpu-drivers"
 
 
 def test_drivers_need_one_combined_confirmation(make_window, qtbot) -> None:
@@ -62,7 +63,7 @@ def test_dry_run_driver_failure_is_retryable(make_window, qtbot) -> None:
 
 def test_drivers_unavailable_on_arm64(make_window) -> None:
     w = make_window(arch="arm64").window
-    section = w.apps_page.sections["gpu-drivers"]
+    section = w.system_page.sections["gpu-drivers"]
     assert all(not t.available for t in section.tiles)
     for item_id in DRIVER_IDS:
         assert not w.selection.is_selectable(item_id)
@@ -79,7 +80,7 @@ def test_profile_does_not_select_drivers(make_window, qtbot) -> None:
 
 def test_select_all_in_driver_section(make_window, qtbot) -> None:
     w = make_window().window
-    section = w.apps_page.sections["gpu-drivers"]
+    section = w.system_page.sections["gpu-drivers"]
     qtbot.mouseClick(section.toggle_button, Qt.MouseButton.LeftButton)
     assert set(w.selection.ids()) == set(DRIVER_IDS)
     assert section.counter.text() == "3 / 3"
@@ -89,7 +90,7 @@ def test_select_all_in_driver_section(make_window, qtbot) -> None:
 
 def test_select_all_on_arm64_selects_nothing(make_window, qtbot) -> None:
     w = make_window(arch="arm64").window
-    section = w.apps_page.sections["gpu-drivers"]
+    section = w.system_page.sections["gpu-drivers"]
     if section.toggle_button.isEnabled():
         qtbot.mouseClick(section.toggle_button, Qt.MouseButton.LeftButton)
     assert w.selection.ids() == []

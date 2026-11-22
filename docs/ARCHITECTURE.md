@@ -826,9 +826,8 @@ w `actions.py`, wpis w `ACTIONS`, pozycja z `kind = "action"`, `action = "x"`.
   `ErkanOzgurYilmaz.DisplayCAL`, „Instaluj lokalne oprogramowanie” (RTSS i CapFrameX z plików
   lokalnych) usunięte — oba programy instalują się przez winget.
 - **Sterowniki GPU (decyzja właściciela, 2026.11.20)** — kategoria `gpu-drivers` zaraz po
-  „Narzędzia testowe”, pokazywana na stronie **Aplikacje** (to instalacja oprogramowania od
-  producenta, jak pozostałe programy; strona System zawiera ustawienia Windows i pliki
-  lokalne). Kolejność wykonania = kolejność katalogu, więc sterownik instaluje się po
+  „Narzędzia testowe” w katalogu, pokazywana na stronie **System** jako pierwsza sekcja
+  (`SYSTEM_CATEGORY_IDS` w `ui/main_window.py`; przeniesiona z Aplikacji 2026.11.22). Kolejność wykonania = kolejność katalogu, więc sterownik instaluje się po
   narzędziach testowych, przed aplikacjami profesjonalnymi. Każda pozycja ma `confirm`
   (wyłączenie obrazu, restart) — trafia do zbiorczego potwierdzenia. Bez wykrywania karty.
 - **Kopiowanie BenchmarkTools (x64)** zostaje dostępne na obu architekturach (jak w 1.x);

@@ -55,7 +55,7 @@ D:\Narzedzia\
 
 ## Sterowniki GPU
 
-Sekcja „Sterowniki GPU” na stronie „Aplikacje” (tylko Windows x64) instaluje najnowszy
+Sekcja „Sterowniki GPU” na stronie „System” (tylko Windows x64) instaluje najnowszy
 sterownik gamingowy prosto od producenta:
 
 | Pozycja | Co jest instalowane | Rozmiar |

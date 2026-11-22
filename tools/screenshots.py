@@ -286,10 +286,11 @@ def scene_confirm(out: Path, mode: ThemeMode, prefix: str = "") -> None:
 
 def scene_drivers(out: Path, mode: ThemeMode, prefix: str = "") -> None:
     w = make_window(base_services(), mode)
-    section = w.apps_page.sections["gpu-drivers"]
+    w.navigate("system")
+    section = w.system_page.sections["gpu-drivers"]
     w.selection.select("driver-nvidia")
     pump()
-    w.apps_page.scroll.verticalScrollBar().setValue(max(0, section.y() - 8))
+    w.system_page.scroll.verticalScrollBar().setValue(max(0, section.y() - 8))
     save(w, out, f"{prefix}15_sterowniki_gpu")
     w.start_install()
     wait_until(lambda: w.run.last_summary is not None)

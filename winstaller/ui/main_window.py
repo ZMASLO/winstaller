@@ -42,7 +42,7 @@ from winstaller.ui.widgets.confirm_dialog import ask
 from winstaller.ui.widgets.nav import NavRail
 
 #: Install categories shown on the separate "System" page (everything else: "Aplikacje").
-SYSTEM_CATEGORY_IDS = ("system", "extras")
+SYSTEM_CATEGORY_IDS = ("gpu-drivers", "system", "extras")
 
 PAGES: list[tuple[str, str]] = [
     ("apps", "Aplikacje"),
@@ -132,7 +132,10 @@ class MainWindow(QMainWindow):
         self.system_page = SelectionPage(
             page_id="system",
             title="System",
-            subtitle="Ustawienia Windows i pliki lokalne. Wykonywane w tej samej kolejce.",
+            subtitle=(
+                "Sterowniki GPU, ustawienia Windows i pliki lokalne. "
+                "Wykonywane w tej samej kolejce."
+            ),
             categories=system_cats,
             catalog=catalog,
             availability=self.availability,
